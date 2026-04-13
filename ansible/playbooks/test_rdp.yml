@@ -1,0 +1,28 @@
+- name: Set target and credential
+  set_fact:
+    target: "{{ item[0] }}"
+    cred: "{{ item[1] }}"
+
+- name: Attempt RDP login
+  ansible.builtin.shell: |
+    timeout 10 python3 /tmp/rdp_check.py \
+      '{{ cred.domain }}/{{ cred.username }}':'{{ cred.password }}'@'{{ target.ip }}'
+  register: rdp_result
+  ignore_errors: true
+  async: 15
+  poll: 5
+
+- name: Determine result
+  set_fact:
+    login_status: "{{ 'SUCCESS' if rdp_result['rc'] == 0
+      else 'AUTH_FAILED' if 'STATUS_LOGON_FAILURE' in rdp_result['stderr']
+      else 'ACCOUNT_LOCKED' if 'STATUS_ACCOUNT_LOCKED_OUT' in rdp_result['stderr']
+      else 'TIMEOUT' if rdp_result['rc'] == 124
+      else 'UNREACHABLE' if 'Connection refused' in rdp_result['stderr'] or 'timed out' in rdp_result['stderr']
+      else 'FAILED' }}"
+
+- name: Append to report
+  ansible.builtin.lineinfile:
+    path: "{{ report_file }}"
+    line: "{{ target.name }} ({{ target.ip }}) | {{ cred.username }} | {{ cred.password }} | {{ login_status }}"
+    create: yes

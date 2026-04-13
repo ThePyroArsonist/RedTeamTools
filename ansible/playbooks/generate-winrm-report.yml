@@ -1,0 +1,95 @@
+---
+- name: Validate WinRM credentials
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+
+    targets:
+    # Blue Team Boxes
+      - name: svc-samba-01
+        ip: 10.10.10.105
+      - name: svc-database-01
+        ip: 10.10.10.103
+      - name: svc-redis-01
+        ip: 10.10.10.102
+      - name: svc-amazin-01
+        ip: 10.10.10.104
+      - name: svc-ftp-01
+        ip: 10.10.10.101
+      - name: blue-ubnt-01
+        ip: 10.10.10.106
+      - name: blue-ubnt-02
+        ip: 10.10.10.107
+      - name: blue-ubnt-03
+        ip: 10.10.10.108
+      - name: blue-ubnt-04
+        ip: 10.10.10.109
+      - name: blue-win-01
+        ip: 10.10.10.23
+      - name: blue-win-02
+        ip: 10.10.10.24
+      - name: blue-win-03
+        ip: 10.10.10.25
+      - name: blue-win-04
+        ip: 10.10.10.26
+      - name: blue-win-05
+        ip: 10.10.10.27
+      - name: blue-win-06
+        ip: 10.10.10.28
+      - name: blue-win-07
+        ip: 10.10.10.29
+      - name: blue-win-08
+        ip: 10.10.10.30
+      
+      # Red Team Boxes
+      - name: red-kali-1
+        ip: 10.10.10.151
+      - name: red-kali-2
+        ip: 10.10.10.152
+      - name: red-kali-3
+        ip: 10.10.10.153
+      - name: red-kali-4
+        ip: 10.10.10.154
+      - name: red-kali-5
+        ip: 10.10.10.155
+      - name: red-kali-6
+        ip: 10.10.10.156
+      - name: red-kali-7
+        ip: 10.10.10.157
+      - name: red-kali-8
+        ip: 10.10.10.158
+      - name: red-kali-9
+        ip: 10.10.10.159
+      - name: red-kali-10
+        ip: 10.10.10.160
+      - name: red-kali-11
+        ip: 10.10.10.161
+      - name: red-kali-12
+        ip: 10.10.10.162
+      - name: red-ubuntu-1
+        ip: 10.10.10.171
+      - name: red-ubuntu-2
+        ip: 10.10.10.172
+      - name: red-ubuntu-3
+        ip: 10.10.10.173
+      - name: red-ubuntu-4
+        ip: 10.10.10.174
+
+    credentials:
+    - { username: "jbezos", password: "AmazonRocks!", domain: "CDT"}
+
+    report_file: "./winrm_audit_report.txt"
+
+  tasks:
+
+    - name: Initialize report
+      ansible.builtin.copy:
+        dest: "{{ report_file }}"
+        content: "WinRM Audit Report\n====================\n\n"
+
+    - name: Test all credential combinations
+      ansible.builtin.include_tasks: test_winrm.yml
+      loop: "{{ targets | product(credentials) | list }}"
+      loop_control:
+        label: "{{ item.0.name }} - {{ item.1.username }}"

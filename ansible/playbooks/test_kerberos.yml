@@ -1,0 +1,37 @@
+- name: Set target and credential
+  set_fact:
+    target: "{{ item.0 }}"
+    cred: "{{ item.1 }}"
+
+- name: Attempt Kerberos kinit
+  # We use pipe to pass the password to kinit to avoid interactive prompts
+  ansible.builtin.shell: |
+    echo "{{ cred.password }}" | kinit {{ cred.username }}@CDT.LOCAL
+  register: krb_result
+  ignore_errors: true
+  # We don't want to spam the log with passwords if it fails
+
+- name: Determine result
+  set_fact:
+    login_status: >-
+      {% if krb_result.rc == 0 %}
+      SUCCESS
+      {% elif 'Password incorrect' in krb_result.stderr or 'Preauthentication failed' in krb_result.stderr %}
+      AUTH_FAILED
+      {% elif 'Cannot contact any KDC' in krb_result.stderr %}
+      KDC_UNREACHABLE
+      {% elif 'Client not found' in krb_result.stderr %}
+      USER_NOT_FOUND
+      {% else %}
+      FAILED
+      {% endif %}
+
+- name: Append to report
+  ansible.builtin.lineinfile:
+    path: "{{ report_file }}"
+    line: "{{ target.name }} ({{ target.ip }}) | {{ cred.username }} | {{ cred.password }} | {{ login_status }}"
+    create: yes
+
+- name: Cleanup Kerberos ticket
+  ansible.builtin.command: kdestroy
+  when: krb_result.rc == 0
