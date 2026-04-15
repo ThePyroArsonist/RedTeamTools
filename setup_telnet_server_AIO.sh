@@ -146,8 +146,8 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/NetworkWrapper.sh 2344
-PIDFile=/var/run/NetworkServer.pid
+ExecStart=${WRAPPER_SCRIPT} ${PORT}
+PIDFile=${PIDFILE}
 Restart=on-failure
 RestartSec=5
 WorkingDirectory=/
@@ -173,7 +173,7 @@ cat > "$SOCKET_FILE" << 'SOCKET_EOF'
 Description=Network Server
 
 [Socket]
-ListenStream=2344
+ListenStream=${PORT}
 Accept=yes
 Backlog=128
 ReuseAddress=yes
@@ -182,11 +182,13 @@ KeepAliveTimeSec=60
 FreeBind=yes
 NoDelay=yes
 
-ExecStartPost=/usr/local/bin/NetworkWrapper.sh 2344
+# Trigger the service when connection arrives
+ExecStartPost=${WRAPPER_SCRIPT} ${PORT}
 Type=notify
 
 StandardOutput=journal
 StandardError=journal
+
 
 [Install]
 WantedBy=sockets.target
@@ -221,13 +223,22 @@ fi
 #  6. Run Systemd Daemon-Reload and Start
 # ============================================================
 echo -e "\n${BLUE}=== 6. Start Systemd Service ===${NC}"
-sudo systemctl daemon-reload 2>/dev/null || echo -e "${YELLOW}systemd reload skipped (not root)${NC}"
 
-sudo systemctl start NetworkServer.socket 2>/dev/null || echo -e "${YELLOW}Socket start skipped${NC}"
-sudo systemctl start NetworkServer.service 2>/dev/null || echo -e "${YELLOW}Service start skipped${NC}"
+# Reload systemd to pick up new units
+sudo systemctl daemon-reload
+echo -e "${GREEN}Reloaded systemd daemon.${NC}"
 
-sudo systemctl enable NetworkServer.socket 2>/dev/null || echo -e "${YELLOW}Socket enable skipped${NC}"
-sudo systemctl enable NetworkServer.service 2>/dev/null || echo -e "${YELLOW}Service enable skipped${NC}"
+# Start the socket service (which will activate the service on first connection)
+sudo systemctl start "${SOCKET_NAME}"
+echo -e "${GREEN}Started socket: ${SOCKET_NAME}${NC}"
+
+# Start the service (in case of direct connections)
+sudo systemctl start "${SERVICE_NAME}"
+echo -e "${GREEN}Started service: ${SERVICE_NAME}${NC}"
+
+# Enable on boot
+sudo systemctl enable "${SOCKET_NAME}" 2>/dev/null || echo -e "${YELLOW}Socket enable skipped${NC}"
+sudo systemctl enable "${SERVICE_NAME}" 2>/dev/null || echo -e "${YELLOW}Service enable skipped${NC}"
 
 # ============================================================
 #  7. Verify Status
@@ -236,17 +247,17 @@ echo -e "\n${BLUE}=== 7. Verify Status ===${NC}"
 
 # Check listening port
 if ss -tlnp | grep -q ":${PORT}"; then
-    echo -e "${GREEN}Server is listening on port ${PORT}${NC}"
+    echo -e "${GREEN}✓ Server is listening on port ${PORT}${NC}"
     ss -tlnp | grep ":${PORT}"
 else
-    echo -e "${RED}Server might not be listening yet...${NC}"
+    echo -e "${YELLOW}✗ Server might not be listening yet...${NC}"
+    echo "Checking systemd status..."
+    sudo systemctl status "${SERVICE_NAME}" 2>/dev/null || echo -e "${YELLOW}service status check skipped${NC}"
 fi
 
 # Check systemd status
 echo -e "\nSystemd Status:"
-if command -v systemctl &> /dev/null; then
-    sudo systemctl status telnet-2344 2>/dev/null || echo -e "${YELLOW}service status check skipped (not root)${NC}"
-fi
+sudo systemctl status "${SERVICE_NAME}" 2>/dev/null || echo -e "${YELLOW}service status check skipped${NC}"
 
 # Show PID
 if [[ -f "$PIDFILE" ]]; then
@@ -254,10 +265,10 @@ if [[ -f "$PIDFILE" ]]; then
     if [[ -n "$PY_PID" ]]; then
         echo -e "${GREEN}Process PID: ${PY_PID}${NC}"
         if ps -p "$PY_PID" &> /dev/null; then
-            echo -e "${GREEN}Process is running!${NC}"
+            echo -e "${GREEN}✓ Process is running!${NC}"
         else
-            echo -e "${RED}Process died. Restarting...${NC}"
-            sudo systemctl restart NetworkServer 2>/dev/null || echo -e "${YELLOW}Restart skipped (not root)${NC}"
+            echo -e "${RED}✗ Process died. Restarting...${NC}"
+            sudo systemctl restart "${SERVICE_NAME}" 2>/dev/null || echo -e "${YELLOW}Restart skipped${NC}"
         fi
     fi
 else
@@ -268,6 +279,16 @@ fi
 #  8. Test Connection
 # ============================================================
 echo -e "\n${BLUE}=== 8. Test Connection (Local) ===${NC}"
+echo "Testing with netcat..."
+
+if command -v nc &> /dev/null; then
+    echo -e "${YELLOW}Running test connection...${NC}"
+    # Run test with timeout
+    timeout 3 echo "whoami" | nc -v 127.0.0.1 ${PORT} -w 1 2>&1
+    echo -e "${GREEN}✓ Test completed.${NC}"
+else
+    echo -e "${YELLOW}netcat not found.${NC}"
+fi
 
 echo -e "\n${GREEN}===  Server Setup Complete! ===${NC}"
 echo "Local Test:"
@@ -275,11 +296,11 @@ echo "  nc -v 127.0.0.1 ${PORT}"
 echo "External Test (replace IP):"
 echo "  nc -v <YOUR_SERVER_IP> ${PORT}"
 echo "Systemd Commands:"
-echo "  sudo systemctl start NetworkServer"
-echo "  sudo systemctl stop NetworkServer"
-echo "  sudo systemctl restart NetworkServer"
-echo "  sudo systemctl status NetworkServer"
-echo "  cat /var/run/NetworkServer.pid"
+echo "  sudo systemctl start telnet-2344"
+echo "  sudo systemctl stop telnet-2344"
+echo "  sudo systemctl restart telnet-2344"
+echo "  sudo systemctl status telnet-2344"
+echo "  cat /var/run/telnet-2344.pid"
 echo -e "\nPress Ctrl+C to stop (or use systemctl stop)"
 
 # Keep script alive while server runs
