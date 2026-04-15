@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# Config
 PORT=${1:-2344}
 
 echo -e "\n=== Telnet Server ==="
