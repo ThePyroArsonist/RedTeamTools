@@ -21,29 +21,30 @@ param(
     [string]$C2ServerIP = "10.10.10.50",
 
     [Parameter(Mandatory = $false)]
-    [switch]$Verbose,
+    [switch]$ShowVerbose,
 
     [Parameter(Mandatory = $false)]
-    [switch]$Quiet
+    [switch]$QuietMode
 )
 
-function :Log{
-    param($Message, $Level = "INFO")
+function :Log-Info{
+    param($Message)
     
-    if ($Verbose -or $Level -ne "INFO") {
+    if ($ShowVerbose -or $Verbose -ne "INFO") {
         $Timestamp = Get-Date -Format "HH:mm:ss"
-        if ($Quiet) {
-            Write-Host "[$Timestamp] $Level: $Message" -ForegroundColor Gray
+        if ($QuietMode) {
+            Write-Host "[$Timestamp] $Message" -ForegroundColor Gray
         } else {
-            $Color = if ($Level -eq "INFO") { "[INFO]" -f "Cyan" } `
-                    elseif ($Level -eq "WARN") { "[WARN]" -f "Yellow" } `
-                    elseif ($Level -eq "ERROR") { "[ERROR]" -f "Red" } `
-                    elseif ($Level -eq "OK") { "[OK]" -f "Green" } `
+            $Color = if ($Message -like "*INFO*") { "[INFO]" -f "Cyan" } `
+                    elseif ($Message -like "*WARN*") { "[WARN]" -f "Yellow" } `
+                    elseif ($Message -like "*ERROR*") { "[ERROR]" -f "Red" } `
+                    elseif ($Message -like "*OK*") { "[OK]" -f "Green" } `
                     else { "[DEBUG]" -f "Magenta" }
             Write-Host "[$Timestamp] $Color $Message"
         }
     }
 }
+
 
 function :Check-Admin{
     if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole("Administrator")) {
