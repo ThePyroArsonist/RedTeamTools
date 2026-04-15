@@ -1,51 +1,52 @@
 #!/bin/bash
 
-# Configuration
+# ==========================================
+# CONFIGURATION
+# ==========================================
 PORT=${1:-2344}
-INTERFACE="0.0.0.0"
+INTERFACE="0.0.0.0" # 0.0.0.0 = Listen on ALL (Local & External)
 
-echo -e "${GREEN}=== Unauthenticated Telnet/Shell Server Setup ===${NC}"
-echo "Binding to: ${INTERFACE}:${PORT}"
-echo "Mode: ${INTERFACE} (Local + External Accessable)"
-echo ""
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
 
-# Helper: Check if port is already in use
-check_port() {
-    if command -v ss &> /dev/null; then
-        ss -tlnp | grep ":${PORT}"
-    elif command -v netstat &> /dev/null; then
-        netstat -tlnp | grep ":${PORT}"
-    fi
-}
+echo -e "\n${GREEN}==========================================${NC}"
+echo -e "${GREEN}=== Unauthenticated Telnet/Shell Server ===${NC}"
+echo -e "${GREEN}==========================================${NC}"
+echo "Config Port: ${PORT}"
+echo "Binding IP:  ${INTERFACE}"
+echo "Date/Time:   $(date '+%F %T')"
 
-# Check if port is already in use
-if [ $(check_port | wc -l) -gt 0 ]; then
-    echo -e "${RED}Warning: Port ${PORT} is already in use!${NC}"
-    read -p "Do you want to kill existing process and restart? (y/n) " -n 1 -r
+# ==========================================
+# 1. Cleanup Existing Process
+# ==========================================
+if ss -tlnp 2>/dev/null | grep -q ":${PORT}"; then
+    echo -e "${YELLOW}Warning: Port ${PORT} is already in use.${NC}"
+    read -p "Kill existing process and restart? (y/n) " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        pkill -f "${PORT}" 2>/dev/null || true
+        pkill -f "bash" 2>/dev/null || pkill -f "${PORT}" || true
         sleep 1
     else
         exit 1
     fi
 fi
 
-# Check for preferred tools
+# ==========================================
+# 2. Detect Best Server
+# ==========================================
 if command -v socat &> /dev/null; then
-    echo -e "${YELLOW}Detected ${GREEN}socat${YELLOW} (Best Performance for Shells)${NC}"
-    # socat with fork allows multiple simultaneous connections
-    # EXEC:bash -i spawns an interactive shell
-    socat -T 1 TCP-LISTEN:${PORT},reuse,fork EXEC:bash -i,pty
-    echo "Server started on ${INTERFACE}:${PORT}. Press Ctrl+C to stop."
+    echo -e "\n${GREEN}Using ${YELLOW}socat${GREEN} (Fastest/Most Reliable)${NC}"
     socat -T 0 TCP-LISTEN:${PORT},reuse,fork EXEC:bash -i,pty
+    # socat keeps running, script needs to sleep forever or be detached
+    while true; do sleep 1; done
 elif command -v python3 &> /dev/null; then
-    echo -e "${YELLOW}Detected ${GREEN}python3${YELLOW} (Fallback Mode - Optimized for Speed)${NC}"
+    echo -e "\n${GREEN}Using ${YELLOW}python3${GREEN} (Fallback - Optimized)${NC}"
     
-    # Create a temp Python script to avoid heredoc issues
+    # Create a temp Python script for clean variable handling
     PY_SCRIPT=$(mktemp /tmp/py_telnet_XXXXXX.py)
-    
-    # KEY: Unquoted heredoc to allow Bash variable expansion
     cat > "$PY_SCRIPT" << PYEOF
 import socket
 import subprocess
@@ -54,55 +55,51 @@ import os
 HOST = "${INTERFACE}"
 PORT = ${PORT}
 
-print(f"Python Telnet Server starting on {HOST}:{PORT} (Local + External).")
+print(f"\n[PYTHON] Starting Telnet Server: {HOST}:{PORT}")
+print(f"[PYTHON] Current IP:     {os.popen('hostname -I 2>/dev/null || ip -4 addr show eth0 2>/dev/null | grep -oP \"(?:\\d{{1,3}\\.}){{3}}\\d{1,3}\"')[0] if os.popen('hostname -I 2>/dev/null || ip -4 addr show eth0 2>/dev/null | grep -oP \"(?:\\d{{1,3}\\.}){{3}}\\d{1,3}\"') else 'Unknown'")
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Disable Nagle's algorithm
+sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Fix #1: Disable Buffering
+
+# Bind to HOST:PORT
 sock.bind((HOST, PORT))
-sock.listen(1)  # Listen queue of 1
-print(f"Listening on socket. Hit Ctrl+C to stop.")
+sock.listen(5)
+print(f"[PYTHON] Listening on {HOST}:{PORT} ...")
 
 while True:
     try:
         conn, addr = sock.accept()
-        print(f"Accepted connection from {addr}")
-        
-        # Set TCP_NODELAY for the connection to avoid buffering
+        print(f"[PYTHON] ACCEPTED from {addr}")
+        # Fix #2: Set TCP_NODELAY on the connection
         conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         
-        # Pass the socket directly to the shell subprocess with unbuffered I/O
-        try:
-            cmd = subprocess.Popen(
-                ['bash', '-i'], 
-                stdin=sock, 
-                stdout=sock, 
-                stderr=sock,
-                bufsize=1,  # Unbuffered I/O
-                universal_newlines=False  # Use raw bytes
-            )
-            cmd.wait()
-        except Exception as e:
-            print(f"Shell subprocess error: {e}")
-            conn.close()
+        # Fix #3: Unbuffered I/O for raw bytes
+        cmd = subprocess.Popen(
+            ['bash', '-i'], 
+            stdin=conn, 
+            stdout=conn, 
+            stderr=conn,
+            bufsize=1, 
+            universal_newlines=False
+        )
+        cmd.wait()
+        conn.close()
     except KeyboardInterrupt:
-        print("\nShutting down gracefully...")
+        print("\n[PYTHON] Shutting down gracefully...")
         break
     except Exception as e:
-        print(f"Connection error: {e}")
+        print(f"[PYTHON] Error: {e}")
         break
 PYEOF
-
-    echo "Running Python script: $PY_SCRIPT"
-    python3 "$PY_SCRIPT"
     
-    # Cleanup
+    python3 "$PY_SCRIPT"
     rm -f "$PY_SCRIPT"
-
 elif command -v nc &> /dev/null; then
-    echo -e "${YELLOW}Detected ${GREEN}nc${YELLOW} (Netcat Fallback)${NC}"
+    echo -e "\n${GREEN}Using ${YELLOW}nc (Netcat Fallback)${NC}"
     nc -l -p ${PORT} -k -e bash -i
 else
-    echo -e "${RED}Error: No suitable server found (Try installing python3 or netcat)${NC}"
+    echo -e "\n${RED}Error: No suitable server found!${NC}"
+    echo "Install python3, socat, or netcat."
     exit 1
 fi
