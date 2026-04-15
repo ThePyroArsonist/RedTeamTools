@@ -46,7 +46,6 @@ elif command -v python3 &> /dev/null; then
     
     # Create a temp Python script to avoid heredoc issues
     PY_SCRIPT=$(mktemp /tmp/py_telnet_XXXXXX.py)
-    cat > "$PY_SCRIPT" << 'PYEOF'
 import socket
 import subprocess
 
