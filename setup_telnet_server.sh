@@ -2,7 +2,7 @@
 
 # Configuration
 PORT=${1:-2344}
-INTERFACE="0.0.0.0"  # "0.0.0.0" = Listen on All Interfaces (Local + External)
+INTERFACE="0.0.0.0"
 
 # Colors
 GREEN='\033[0;32m'
@@ -30,11 +30,7 @@ if [ $(check_port | wc -l) -gt 0 ]; then
     read -p "Do you want to kill existing process and restart? (y/n) " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        if command -v ss &> /dev/null; then
-            pkill -f "${PORT}" 2>/dev/null
-        else
-            pkill -f "${PORT}" 2>/dev/null || true
-        fi
+        pkill -f "bash" 2>/dev/null || true
         sleep 1
     else
         exit 1
@@ -47,14 +43,17 @@ if command -v socat &> /dev/null; then
     socat -T 0 TCP-LISTEN:${PORT},reuse,fork EXEC:bash -i,pty
 elif command -v python3 &> /dev/null; then
     echo -e "${YELLOW}Detected ${GREEN}python3${YELLOW} (Fallback Mode)${NC}"
-    python3 << PYTHON_EOF
+    
+    # Create a temp Python script to avoid heredoc issues
+    PY_SCRIPT=$(mktemp /tmp/py_telnet_XXXXXX.py)
+    cat > "$PY_SCRIPT" << 'PYEOF'
 import socket
 import subprocess
 
-HOST = '${INTERFACE}'
+HOST = "${INTERFACE}"
 PORT = ${PORT}
 
-print(f"Python Telnet Server starting on {HOST}:{PORT} (Local + External)...")
+print(f"Python Telnet Server starting on {HOST}:{PORT} (Local + External).")
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -66,8 +65,6 @@ while True:
     try:
         conn, addr = sock.accept()
         print(f"Accepted connection from {addr}")
-
-        # Pipe TCP stream directly to stdin/stdout of bash
         try:
             cmd = subprocess.Popen(['bash', '-i'], stdin=sock, stdout=sock, stderr=sock)
             cmd.wait()
@@ -80,7 +77,13 @@ while True:
     except Exception as e:
         print(f"Connection error: {e}")
         break
-PYTHON_EOF
+PYEOF
+    
+    python3 "$PY_SCRIPT"
+    
+    # Cleanup
+    rm -f "$PY_SCRIPT"
+    
 elif command -v nc &> /dev/null; then
     echo -e "${YELLOW}Detected ${GREEN}nc${YELLOW} (Netcat Fallback)${NC}"
     nc -l -p ${PORT} -k -e bash -i
