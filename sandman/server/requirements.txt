@@ -1,2 +1,4 @@
-scapy
-requests
+scapy               # Packet sniffing (NTP, UDP)
+requests            
+netifaces           # Interface discovery (Ubuntu/Windows)
+psutil
