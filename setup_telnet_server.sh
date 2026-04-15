@@ -4,15 +4,9 @@
 PORT=${1:-2344}
 INTERFACE="0.0.0.0"
 
-# Colors
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
-
 echo -e "${GREEN}=== Unauthenticated Telnet/Shell Server Setup ===${NC}"
 echo "Binding to: ${INTERFACE}:${PORT}"
-echo "Mode: ${INTERFACE} (Local and External Accessable)"
+echo "Mode: ${INTERFACE} (Local + External Accessable)"
 echo ""
 
 # Helper: Check if port is already in use
@@ -30,7 +24,7 @@ if [ $(check_port | wc -l) -gt 0 ]; then
     read -p "Do you want to kill existing process and restart? (y/n) " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        pkill -f "bash" 2>/dev/null || true
+        pkill -f "${PORT}" 2>/dev/null || true
         sleep 1
     else
         exit 1
@@ -40,18 +34,22 @@ fi
 # Check for preferred tools
 if command -v socat &> /dev/null; then
     echo -e "${YELLOW}Detected ${GREEN}socat${YELLOW} (Best Performance for Shells)${NC}"
+    # socat with fork allows multiple simultaneous connections
+    # EXEC:bash -i spawns an interactive shell
+    socat -T 1 TCP-LISTEN:${PORT},reuse,fork EXEC:bash -i,pty
+    echo "Server started on ${INTERFACE}:${PORT}. Press Ctrl+C to stop."
     socat -T 0 TCP-LISTEN:${PORT},reuse,fork EXEC:bash -i,pty
 elif command -v python3 &> /dev/null; then
-    echo -e "${YELLOW}Detected ${GREEN}python3${YELLOW} (Fallback Mode)${NC}"
+    echo -e "${YELLOW}Detected ${GREEN}python3${YELLOW} (Fallback Mode - Optimized for Speed)${NC}"
     
     # Create a temp Python script to avoid heredoc issues
     PY_SCRIPT=$(mktemp /tmp/py_telnet_XXXXXX.py)
     
-    # KEY FIX: Ensure heredoc variables expand correctly
-    # Use unquoted PYEOF (without quotes) so Bash expands ${INTERFACE} and ${PORT}
+    # KEY: Unquoted heredoc to allow Bash variable expansion
     cat > "$PY_SCRIPT" << PYEOF
 import socket
 import subprocess
+import os
 
 HOST = "${INTERFACE}"
 PORT = ${PORT}
@@ -60,16 +58,29 @@ print(f"Python Telnet Server starting on {HOST}:{PORT} (Local + External).")
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Disable Nagle's algorithm
 sock.bind((HOST, PORT))
-sock.listen(5)
+sock.listen(1)  # Listen queue of 1
 print(f"Listening on socket. Hit Ctrl+C to stop.")
 
 while True:
     try:
         conn, addr = sock.accept()
         print(f"Accepted connection from {addr}")
+        
+        # Set TCP_NODELAY for the connection to avoid buffering
+        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        
+        # Pass the socket directly to the shell subprocess with unbuffered I/O
         try:
-            cmd = subprocess.Popen(['bash', '-i'], stdin=sock, stdout=sock, stderr=sock)
+            cmd = subprocess.Popen(
+                ['bash', '-i'], 
+                stdin=sock, 
+                stdout=sock, 
+                stderr=sock,
+                bufsize=1,  # Unbuffered I/O
+                universal_newlines=False  # Use raw bytes
+            )
             cmd.wait()
         except Exception as e:
             print(f"Shell subprocess error: {e}")
@@ -81,13 +92,13 @@ while True:
         print(f"Connection error: {e}")
         break
 PYEOF
-    
-    echo "Executing Python script: $PY_SCRIPT"
+
+    echo "Running Python script: $PY_SCRIPT"
     python3 "$PY_SCRIPT"
     
     # Cleanup
     rm -f "$PY_SCRIPT"
-    
+
 elif command -v nc &> /dev/null; then
     echo -e "${YELLOW}Detected ${GREEN}nc${YELLOW} (Netcat Fallback)${NC}"
     nc -l -p ${PORT} -k -e bash -i
