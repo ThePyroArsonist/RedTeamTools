@@ -123,7 +123,7 @@ if [[ ! -d "$SYSTEMD_DIR" ]]; then
 fi
 
 # Create service file
-SERVICE_FILE="${SYSTEMD_DIR}/${SERVICE_NAME}"
+SERVICE_FILE="${SYSTEMD_DIR}/${SERVICE_NAME}.service"
 
 # Build service file line-by-line (ensures variable expansion)
 echo "[Unit]" > "$SERVICE_FILE"
