@@ -2,7 +2,7 @@
 
 /etc/systemd/system/
 NetworkServer.socket
-NetworkServer
+NetworkServer.service
 
 /var/run
 NetworkServer.pid
