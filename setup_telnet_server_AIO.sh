@@ -7,7 +7,7 @@
 # Configuration
 PORT=${1:-2344}
 PIDFILE="/var/run/NetworkServer.pid"
-SERVICE_NAME="NetworkServer.service"
+SERVICE_NAME="NetworkServer"
 SOCKET_NAME="${SERVICE_NAME}.socket"
 WRAPPER_SCRIPT="/usr/local/bin/NetworkWrapper.sh"
 PYTHON_SCRIPT="/tmp/py_$(date +%s).py"
@@ -124,7 +124,7 @@ if [[ ! -d "$SYSTEMD_DIR" ]]; then
 fi
 
 # Create service file
-SERVICE_FILE="${SYSTEMD_DIR}/${SERVICE_NAME}"
+SERVICE_FILE="${SYSTEMD_DIR}/${SERVICE_NAME}.service"
 
 # Build service file line-by-line (ensures variable expansion)
 echo "[Unit]" > "$SERVICE_FILE"
