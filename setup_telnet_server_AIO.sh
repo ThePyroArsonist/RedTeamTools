@@ -55,9 +55,9 @@ if [[ ! -f "$WRAPPER_SCRIPT" ]]; then
 # Wrapper script for unauthenticated telnet server
 # Runs the Python server and manages PID file
 
-# KEY FIX: Get port from argument, default to 2344
+# Get port from argument, default to 2344
 PORT=${1:-2344}
-PIDFILE="${PIDFILE}"
+PIDFILE="/var/run/NetworkServer.pid"
 
 # Create Python server script
 PYFILE="/tmp/py_$(date +%s).py"
@@ -123,29 +123,32 @@ if [[ ! -d "$SYSTEMD_DIR" ]]; then
 fi
 
 # Create service file
-SERVICE_FILE="${SYSTEMD_DIR}/${SERVICE_NAME}.service"
-cat > "$SERVICE_FILE" << 'SERVICE_EOF'
-[Unit]
-Description=Network Server on Port "${PORT}"
-After=network.target
+SERVICE_FILE="${SYSTEMD_DIR}/${SERVICE_NAME}"
 
-[Service]
-Type=simple
-ExecStart="${WRAPPER_SCRIPT}" "${PORT}"
-PIDFile="${PIDFILE}"
-Restart=on-failure
-RestartSec=5
-WorkingDirectory=/
-StandardOutput=journal
-StandardError=journal
-KillSignal=SIGINT
-KillMode=process
+# Build service file line-by-line (ensures variable expansion)
+echo "[Unit]" > "$SERVICE_FILE"
+echo "Description=Network Server on Port ${PORT}" >> "$SERVICE_FILE"
+echo "After=network.target" >> "$SERVICE_FILE"
+echo "" >> "$SERVICE_FILE"
+echo "[Service]" >> "$SERVICE_FILE"
+echo "Type=simple" >> "$SERVICE_FILE"
 
-[Install]
-WantedBy=multi-user.target
-SERVICE_EOF
+# KEY: Use double quotes for ExecStart to handle variables
+echo "ExecStart=\"${WRAPPER_SCRIPT}\" \"${PORT}\"" >> "$SERVICE_FILE"
+echo "PIDFile=${PIDFILE}" >> "$SERVICE_FILE"
+echo "Restart=on-failure" >> "$SERVICE_FILE"
+echo "RestartSec=5" >> "$SERVICE_FILE"
+echo "WorkingDirectory=/" >> "$SERVICE_FILE"
+echo "StandardOutput=journal" >> "$SERVICE_FILE"
+echo "StandardError=journal" >> "$SERVICE_FILE"
+echo "KillSignal=SIGINT" >> "$SERVICE_FILE"
+echo "KillMode=process" >> "$SERVICE_FILE"
+echo "" >> "$SERVICE_FILE"
+echo "[Install]" >> "$SERVICE_FILE"
+echo "WantedBy=multi-user.target" >> "$SERVICE_FILE"
 
 echo -e "${GREEN}Created: ${SERVICE_FILE}${NC}"
+
 
 # ============================================================
 #  4. Create Systemd Socket Unit File (Network Activation)
@@ -153,31 +156,30 @@ echo -e "${GREEN}Created: ${SERVICE_FILE}${NC}"
 echo -e "\n${BLUE}=== 4. Create Systemd Socket ===${NC}"
 SOCKET_FILE="${SYSTEMD_DIR}/${SOCKET_NAME}"
 
-cat > "$SOCKET_FILE" << 'SOCKET_EOF'
-[Unit]
-Description=Network Server
+# Build socket file line-by-line (ensures variable expansion)
+echo "[Unit]" > "$SOCKET_FILE"
+echo "Description=Network Server Socket" >> "$SOCKET_FILE"
+echo "" >> "$SOCKET_FILE"
+echo "[Socket]" >> "$SOCKET_FILE"
+echo "ListenStream=${PORT}" >> "$SOCKET_FILE"
+echo "Accept=yes" >> "$SOCKET_FILE"
+echo "Backlog=128" >> "$SOCKET_FILE"
+echo "ReuseAddress=yes" >> "$SOCKET_FILE"
+echo "KeepAlive=yes" >> "$SOCKET_FILE"
+echo "KeepAliveTimeSec=60" >> "$SOCKET_FILE"
+echo "FreeBind=yes" >> "$SOCKET_FILE"
+echo "NoDelay=yes" >> "$SOCKET_FILE"
+echo "" >> "$SOCKET_FILE"
 
-[Socket]
-ListenStream="${PORT}"
-Accept=yes
-Backlog=128
-ReuseAddress=yes
-KeepAlive=yes
-KeepAliveTimeSec=60
-FreeBind=yes
-NoDelay=yes
-
-# Trigger the service when connection arrives
-ExecStartPost="${WRAPPER_SCRIPT}" "${PORT}"
-Type=notify
-
-StandardOutput=journal
-StandardError=journal
-
-
-[Install]
-WantedBy=sockets.target
-SOCKET_EOF
+# KEY: Pass port to wrapper script
+echo "ExecStartPost=\"${WRAPPER_SCRIPT}\" \"${PORT}\"" >> "$SOCKET_FILE"
+echo "Type=notify" >> "$SOCKET_FILE"
+echo "" >> "$SOCKET_FILE"
+echo "StandardOutput=journal" >> "$SOCKET_FILE"
+echo "StandardError=journal" >> "$SOCKET_FILE"
+echo "" >> "$SOCKET_FILE"
+echo "[Install]" >> "$SOCKET_FILE"
+echo "WantedBy=sockets.target" >> "$SOCKET_FILE"
 
 echo -e "${GREEN}Created: ${SOCKET_FILE}${NC}"
 
