@@ -57,10 +57,10 @@ if [[ ! -f "$WRAPPER_SCRIPT" ]]; then
 
 # KEY FIX: Get port from argument, default to 2344
 PORT=${1:-2344}
-PIDFILE="/var/run/telnet-2344.pid"
+PIDFILE="${PIDFILE}"
 
 # Create Python server script
-PYFILE="/tmp/py_telnet_$(date +%s).py"
+PYFILE="/tmp/py_$(date +%s).py"
 
 # Build Python code line-by-line (ensures variable expansion)
 echo "import socket" > "$PYFILE"
@@ -126,7 +126,7 @@ fi
 SERVICE_FILE="${SYSTEMD_DIR}/${SERVICE_NAME}.service"
 cat > "$SERVICE_FILE" << 'SERVICE_EOF'
 [Unit]
-Description=Network Server on Port 2344
+Description=Network Server on Port "${PORT}"
 After=network.target
 
 [Service]
