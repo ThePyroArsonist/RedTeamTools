@@ -29,7 +29,7 @@ import socket
 import subprocess
 
 HOST = "0.0.0.0"
-PORT = '''${PORT}'''  # Bash expands this to the integer 2344
+PORT = ${PORT}
 
 print(f"\n[OK] Python Telnet Server Starting...")
 print(f"[OK] Listening on {HOST}:{PORT}")
