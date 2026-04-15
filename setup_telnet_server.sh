@@ -2,73 +2,59 @@
 
 PORT=${1:-2344}
 
-echo -e "\n${GREEN}=== Telnet Server ===${NC}"
+echo -e "\n=== Telnet Server ==="
 echo "Config Port: ${PORT}"
-echo "Binding IP:  0.0.0.0 (Local + External)"
+echo "Binding: 0.0.0.0 (Local + External)"
 
 # Cleanup
 if ss -tlnp 2>/dev/null | grep -q ":${PORT}"; then
-    echo -e "\n${YELLOW}Port ${PORT} already in use...${NC}"
+    echo -e "\nPort ${PORT} in use..."
     pkill -f "2344" 2>/dev/null || pkill -f "bash"
     sleep 1
 fi
 
 # Use socat first
 if command -v socat &> /dev/null; then
-    echo -e "\n${GREEN}Using ${YELLOW}socat${GREEN}...${NC}"
+    echo -e "\nUsing socat...";
     socat -T 0 TCP-LISTEN:${PORT},reuse,fork EXEC:bash -i,pty
     while true; do sleep 1; done
 else
-    echo -e "\n${GREEN}Using ${YELLOW}python3${GREEN}...${NC}"
-    
-    # KEY FIX: UNQUOTED heredoc `<< PYEOF` allows `${PORT}` to expand
-    PYFILE="/tmp/py_telnet_server_$(date +%s).py"
-    
-    cat > "$PYFILE" << PYEOF
-import socket
-import subprocess
+    echo -e "\nUsing python3..."
 
-HOST = "0.0.0.0"
-PORT = '''${PORT}'''
+    # KEY: Create temp file with variable expanded BEFORE Python sees it
+    PYFILE="/tmp/py_telnet_$(date +%s).py"
 
-print(f"\n[OK] Python Telnet Server Starting...")
-print(f"[OK] Listening on {HOST}:{PORT}")
-print(f"[OK] Press Ctrl+C to stop")
+    # Write the Python code using a simple heredoc
+    echo "import socket" > "$PYFILE"
+    echo "import subprocess" >> "$PYFILE"
+    echo "" >> "$PYFILE"
+    echo "HOST = \"0.0.0.0\"" >> "$PYFILE"
+    echo "PORT = ${PORT}" >> "$PYFILE"  # This line gets: PORT = 2344
+    echo "" >> "$PYFILE"
+    echo "print(f'[OK] Starting...')" >> "$PYFILE"
+    echo "print(f'[OK] Listening on {HOST}:{PORT}')" >> "$PYFILE"
+    echo "" >> "$PYFILE"
+    echo "sock = socket.socket()" >> "$PYFILE"
+    echo "sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)" >> "$PYFILE"
+    echo "sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)" >> "$PYFILE"
+    echo "sock.bind((HOST, PORT))" >> "$PYFILE"
+    echo "sock.listen(5)" >> "$PYFILE"
+    echo "" >> "$PYFILE"
+    echo "while True:" >> "$PYFILE"
+    echo "    try:" >> "$PYFILE"
+    echo "        conn, addr = sock.accept()" >> "$PYFILE"
+    echo "        print(f'[OK] ACCEPTED: {addr}')" >> "$PYFILE"
+    echo "        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)" >> "$PYFILE"
+    echo "        subprocess.Popen(['bash', '-i'], stdin=conn, stdout=conn, stderr=conn, bufsize=1).wait()" >> "$PYFILE"
+    echo "        conn.close()" >> "$PYFILE"
+    echo "    except KeyboardInterrupt:" >> "$PYFILE"
+    echo "        break" >> "$PYFILE"
+    echo "    except Exception as e:" >> "$PYFILE"
+    echo "        print(f'[WARN] Error: {e}')" >> "$PYFILE"
+    echo "        break" >> "$PYFILE"
 
-sock = socket.socket()
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-
-sock.bind((HOST, PORT))
-sock.listen(5)
-
-while True:
-    try:
-        conn, addr = sock.accept()
-        print(f"[OK] ACCEPTED from: {addr}")
-        
-        # Set TCP_NODELAY on connection
-        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        
-        # Start bash with direct socket piping
-        subprocess.Popen(
-            ['bash', '-i'],
-            stdin=conn, stdout=conn, stderr=conn,
-            bufsize=1
-        ).wait()
-        
-        conn.close()
-        print(f"[OK] Closed: {addr}")
-    except KeyboardInterrupt:
-        print("\n[OK] Stopping...")
-        break
-    except Exception as e:
-        print(f"[WARN] Error: {e}")
-        break
-PYEOF
-
-    echo "[BASH] Running Python server: ${PYFILE}"
+    echo "[BASH] Running Python: ${PYFILE}"
     python3 "$PYFILE"
 fi
 
-echo -e "\n${GREEN}=== Server Ready ===${NC}"
+echo -e "\n=== Server Ready ==="
