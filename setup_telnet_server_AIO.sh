@@ -188,17 +188,17 @@ echo -e "\n${BLUE}=== 5. Configure Firewall ===${NC}"
 
 # Check firewall type
 if command -v ufw &> /dev/null; then
-    sudo ufw allow 2344/tcp
+    sudo ufw allow "${PORT}"/tcp
     echo -e "${GREEN}Firewall (ufw) configured.${NC}"
     sudo ufw reload
     echo -e "${GREEN}Reloaded: ${NC}"
 elif command -v firewall-cmd &> /dev/null; then
-    sudo firewall-cmd --add-port=2344/tcp --permanent
+    sudo firewall-cmd --add-port="${PORT}"/tcp --permanent
     sudo firewall-cmd --reload
     echo -e "${GREEN}Firewall (firewalld) configured.${NC}"
 elif command -v iptables &> /dev/null; then
-    sudo iptables -A INPUT -p tcp --dport 2344 -j ACCEPT
-    sudo iptables-save | grep 2344 > /dev/null
+    sudo iptables -A INPUT -p tcp --dport "${PORT}" -j ACCEPT
+    sudo iptables-save | grep "${PORT}" > /dev/null
     echo -e "${GREEN}Firewall (iptables) configured.${NC}"
 else
     echo -e "${YELLOW}Warning: No firewall detected. Check manually!${NC}"
@@ -232,10 +232,10 @@ echo -e "\n${BLUE}=== 7. Verify Status ===${NC}"
 
 # Check listening port
 if ss -tlnp | grep -q ":${PORT}"; then
-    echo -e "${GREEN}✓ Server is listening on port ${PORT}${NC}"
+    echo -e "${GREEN} Server is listening on port ${PORT}${NC}"
     ss -tlnp | grep ":${PORT}"
 else
-    echo -e "${YELLOW}✗ Server might not be listening yet...${NC}"
+    echo -e "${YELLOW} Server might not be listening yet...${NC}"
     echo "Checking systemd status..."
     sudo systemctl status "${SERVICE_NAME}" 2>/dev/null || echo -e "${YELLOW}service status check skipped${NC}"
 fi
@@ -250,9 +250,9 @@ if [[ -f "$PIDFILE" ]]; then
     if [[ -n "$PY_PID" ]]; then
         echo -e "${GREEN}Process PID: ${PY_PID}${NC}"
         if ps -p "$PY_PID" &> /dev/null; then
-            echo -e "${GREEN}✓ Process is running!${NC}"
+            echo -e "${GREEN} Process is running!${NC}"
         else
-            echo -e "${RED}✗ Process died. Restarting...${NC}"
+            echo -e "${RED} Process died. Restarting...${NC}"
             sudo systemctl restart "${SERVICE_NAME}" 2>/dev/null || echo -e "${YELLOW}Restart skipped${NC}"
         fi
     fi
@@ -270,7 +270,7 @@ if command -v nc &> /dev/null; then
     echo -e "${YELLOW}Running test connection...${NC}"
     # Run test with timeout
     timeout 3 echo "whoami" | nc -v 127.0.0.1 ${PORT} -w 1 2>&1
-    echo -e "${GREEN}✓ Test completed.${NC}"
+    echo -e "${GREEN} Test completed.${NC}"
 else
     echo -e "${YELLOW}netcat not found.${NC}"
 fi
