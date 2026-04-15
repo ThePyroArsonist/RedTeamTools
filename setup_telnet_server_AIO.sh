@@ -131,8 +131,8 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${WRAPPER_SCRIPT} ${PORT}
-PIDFile=${PIDFILE}
+ExecStart="${WRAPPER_SCRIPT}" "${PORT}"
+PIDFile="${PIDFILE}"
 Restart=on-failure
 RestartSec=5
 WorkingDirectory=/
@@ -158,7 +158,7 @@ cat > "$SOCKET_FILE" << 'SOCKET_EOF'
 Description=Network Server
 
 [Socket]
-ListenStream=${PORT}
+ListenStream="${PORT}"
 Accept=yes
 Backlog=128
 ReuseAddress=yes
@@ -168,7 +168,7 @@ FreeBind=yes
 NoDelay=yes
 
 # Trigger the service when connection arrives
-ExecStartPost=${WRAPPER_SCRIPT} ${PORT}
+ExecStartPost="${WRAPPER_SCRIPT}" "${PORT}"
 Type=notify
 
 StandardOutput=journal
