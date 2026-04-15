@@ -58,7 +58,7 @@ if ss -tlnp 2>/dev/null | grep -q ":${PORT}"; then
         exit 1
     fi
 else
-    echo -e "${GREEN}✓ Port ${PORT} is free.${NC}"
+    echo -e "${GREEN}Port ${PORT} is free.${NC}"
 fi
 # ============================================================
 #  2. Create Wrapper Script (Persistent Management)
@@ -179,7 +179,6 @@ echo "[Socket]" >> "$SOCKET_FILE"
 echo "ListenStream=${PORT}" >> "$SOCKET_FILE"
 echo "Accept=yes" >> "$SOCKET_FILE"
 echo "Backlog=128" >> "$SOCKET_FILE"
-echo "ReuseAddress=yes" >> "$SOCKET_FILE"
 echo "KeepAlive=yes" >> "$SOCKET_FILE"
 echo "KeepAliveTimeSec=60" >> "$SOCKET_FILE"
 echo "FreeBind=yes" >> "$SOCKET_FILE"
@@ -188,7 +187,6 @@ echo "" >> "$SOCKET_FILE"
 
 # KEY: Pass port to wrapper script
 echo "ExecStartPost=${WRAPPER_SCRIPT} ${PORT}" >> "$SOCKET_FILE"
-echo "Type=notify" >> "$SOCKET_FILE"
 echo "" >> "$SOCKET_FILE"
 echo "StandardOutput=journal" >> "$SOCKET_FILE"
 echo "StandardError=journal" >> "$SOCKET_FILE"
@@ -302,7 +300,7 @@ echo "  sudo systemctl start ${SERVICE_NAME}"
 echo "  sudo systemctl stop ${SERVICE_NAME}"
 echo "  sudo systemctl restart ${SERVICE_NAME}"
 echo "  sudo systemctl status ${SERVICE_NAME}"
-echo "  cat /var/run/${PIDFILE}"
+echo "  cat ${PIDFILE}"
 echo -e "\nPress Ctrl+C to stop (or use systemctl stop)"
 
 # Keep script alive while server runs
