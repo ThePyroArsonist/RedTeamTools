@@ -8,8 +8,8 @@ echo "Binding: 0.0.0.0 (Local + External)"
 
 # Cleanup
 if ss -tlnp 2>/dev/null | grep -q ":${PORT}"; then
-    echo -e "\n${YELLOW}Port ${PORT} in use...${NC}"
-    pkill -f "${PORT}" 2>/dev/null || pkill -f "bash"
+    echo -e "\n${YELLOW}Port ${PORT} already in use...${NC}"
+    pkill -f "2344" 2>/dev/null || pkill -f "bash"
     sleep 1
 fi
 
@@ -21,13 +21,15 @@ if command -v socat &> /dev/null; then
 else
     echo -e "\n${GREEN}Using ${YELLOW}python3${GREEN}...${NC}"
     
-    # Write Python script to file with UNQUOTED heredoc (allows expansion)
-    cat > /tmp/py_telnet_$(date +%s).py << 'PYEOF'
+    # Write Python script to file with UNQUOTED heredoc (variables expand!)
+    PYFILE="/tmp/py_telnet_server.py"
+    
+    cat > "$PYFILE" << PYEOF
 import socket
 import subprocess
 
 HOST = "0.0.0.0"
-PORT = '''${PORT}'''  # This will expand the shell variable
+PORT = '''${PORT}'''  # Bash expands this to the integer 2344
 
 print(f"\n[OK] Python Telnet Server Starting...")
 print(f"[OK] Listening on {HOST}:{PORT}")
@@ -65,8 +67,8 @@ while True:
         break
 PYEOF
 
-    echo "[BASH] Running Python server: /tmp/py_telnet_*.py"
-    python3 /tmp/py_telnet_*.py
+    echo "[BASH] Running Python server: ${PYFILE}"
+    python3 "$PYFILE"
 fi
 
 echo -e "\n${GREEN}=== Server Ready ===${NC}"
