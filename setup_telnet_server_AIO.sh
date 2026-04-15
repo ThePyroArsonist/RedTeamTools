@@ -38,7 +38,7 @@ if ss -tlnp 2>/dev/null | grep -q ":${PORT}"; then
     read -p "Kill existing process and restart? (y/n) " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        pkill -f "${PORT}" 2>/dev/null || pkill -f "bash" 2>/dev/null || true
+        pkill -f "${PORT}" 2>/dev/null || pkill -f "2344" 2>/dev/null || true
         sleep 1
     else
         echo -e "${RED}Cancelled.${NC}"
