@@ -232,7 +232,7 @@ def auto_detect_interface(target_range="10.10.10.0/24", timeout=5):
     print(f"[-] No active interface found for {target_range}, using default: {INTERFACE}")
     return INTERFACE
 
-# === MAIN LOOP (Fixed Syntax) ===
+# === MAIN LOOP ===
 def sniff_loop(interface, filter_str, timeout=5):
     sock = None  # Global socket for sniffing
     try:
@@ -246,16 +246,26 @@ def sniff_loop(interface, filter_str, timeout=5):
                 # 1. Create raw socket for sniffing
                 print(f"[+] Creating raw socket for {interface}...")
                 try:
-                    # Linux: Use AF_PACKET for raw capture
+                    # Try AF_PACKET (Linux raw) first
                     if interface != "lo":
-                        # Try AF_PACKET (need root)
                         try:
                             sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(123))
-                        except socket.error:
+                            print(f"  [✓] AF_PACKET socket created")
+                        except socket.error as e:
                             print(f"  [!] AF_PACKET failed, trying AF_INET fallback...")
-                            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-                            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                            sock.bind((SERVER_HOST, NTP_PORT))
+                            # Fallback: AF_INET with SO_BINDTODEVICE
+                            try:
+                                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+                                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                                sock.bind((SERVER_HOST, NTP_PORT))
+                                print(f"  [✓] AF_INET socket created with {SERVER_HOST}:{NTP_PORT}")
+                            except socket.error as e2:
+                                print(f"  [!] AF_INET fallback failed: {e2}")
+                                # Last resort: bind to interface IP
+                                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+                                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                                sock.bind((ipaddress.IPv4Network("10.10.10.0/24").network_address, NTP_PORT))
+                                print(f"  [✓] Bound to network range: {sock.getsockname()[0]}:{NTP_PORT}")
                     else:
                         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
                         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -297,7 +307,6 @@ def sniff_loop(interface, filter_str, timeout=5):
                         
                         connection.send(pack_ntp_resp(MAGIC_BYTE, b"\x00"))
                     
-                # Inner except for socket errors
                 except socket.timeout:
                     print(f"[+] Timeout. Waiting for next packet...")
                     time.sleep(SLEEP)
@@ -308,7 +317,6 @@ def sniff_loop(interface, filter_str, timeout=5):
                     print(f"  [!] Sniff Packet Error: {e}")
                     time.sleep(SLEEP)
             
-            # Outer except for socket reconnection
             except socket.timeout:
                 print(f"[+] Outer Timeout. Waiting for next packet...")
                 time.sleep(SLEEP)
