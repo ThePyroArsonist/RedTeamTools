@@ -32,20 +32,34 @@ echo "Date:        $(date '+%F %T')"
 echo -e "\n${BLUE}=== 1. Cleanup ===${NC}"
 if ss -tlnp 2>/dev/null | grep -q ":${PORT}"; then
     echo -e "${YELLOW}Warning: Port ${PORT} already in use!${NC}"
-    echo "Existing processes:"
-    ss -tlnp | grep ":${PORT}"
-    
+    ss -tlnp | grep ":${PORT}" | awk '{print $5}' | cut -d':' -f2 | xargs -I {} ps -p {} 2>/dev/null
     read -p "Kill existing process and restart? (y/n) " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        pkill -f "${PORT}" 2>/dev/null || pkill -f "2344" 2>/dev/null || true
-        sleep 1
+        # Get the specific PIDs for the port
+        PIDS=$(ss -tlnp | grep -v "users:" | grep ":${PORT}" | grep -oP "pid \K\d+|LISTEN  \K\d+" 2>/dev/null || ss -tlnp | grep ":${PORT}" | awk '{print $5}' | cut -d'/' -f2 | tr -d ',' | tr -d '(' | xargs -I {} pgrep -f "{}" 2>/dev/null | grep -v grep)
+        
+        # Kill only the specific processes (not all bash!)
+        if [ -n "$PIDS" ]; then
+            echo "Found PIDs: ${PIDS}"
+            for pid in $PIDS; do
+                echo "Killing PID: ${pid}"
+                kill -TERM "$pid" 2>/dev/null || pkill -P "$pid" 2>/dev/null
+            done
+            sleep 1
+        else
+            # Fallback: kill only by port, not all bash
+            echo "Trying alternative kill..."
+            ss -tlnp | grep ":${PORT}" | awk '{print $5}' | cut -d'/' -f2 | tr -d ',' | tr -d '(' | xargs -I {} pgrep -f "{}" 2>/dev/null | grep -v grep | xargs -r kill -TERM 2>/dev/null
+            sleep 1
+        fi
     else
         echo -e "${RED}Cancelled.${NC}"
         exit 1
     fi
+else
+    echo -e "${GREEN}✓ Port ${PORT} is free.${NC}"
 fi
-
 # ============================================================
 #  2. Create Wrapper Script (Persistent Management)
 # ============================================================
