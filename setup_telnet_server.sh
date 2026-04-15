@@ -46,6 +46,10 @@ elif command -v python3 &> /dev/null; then
     
     # Create a temp Python script to avoid heredoc issues
     PY_SCRIPT=$(mktemp /tmp/py_telnet_XXXXXX.py)
+    
+    # KEY FIX: Ensure heredoc variables expand correctly
+    # Use unquoted PYEOF (without quotes) so Bash expands ${INTERFACE} and ${PORT}
+    cat > "$PY_SCRIPT" << PYEOF
 import socket
 import subprocess
 
@@ -78,6 +82,7 @@ while True:
         break
 PYEOF
     
+    echo "Executing Python script: $PY_SCRIPT"
     python3 "$PY_SCRIPT"
     
     # Cleanup
