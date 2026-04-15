@@ -7,7 +7,7 @@
 # Configuration
 PORT=${1:-2344}
 PIDFILE="/var/run/NetworkServer.pid"
-SERVICE_NAME="NetworkServer"
+SERVICE_NAME="NetworkServer.service"
 SOCKET_NAME="${SERVICE_NAME}.socket"
 WRAPPER_SCRIPT="/usr/local/bin/NetworkWrapper.sh"
 PYTHON_SCRIPT="/tmp/py_$(date +%s).py"
@@ -23,8 +23,9 @@ echo -e "\n${GREEN}===  Unauthenticated Telnet Server - All-In-One Setup  ===${N
 echo "Config Port: ${PORT}"
 echo "PID File:    ${PIDFILE}"
 echo "Wrapper:     ${WRAPPER_SCRIPT}"
+echo "Service:     ${SERVICE_NAME}"
+echo "Socket:      ${SOCKET_NAME}"
 echo "Date:        $(date '+%F %T')"
-
 # ============================================================
 #  1. Cleanup Existing Process
 # ============================================================
@@ -123,7 +124,7 @@ if [[ ! -d "$SYSTEMD_DIR" ]]; then
 fi
 
 # Create service file
-SERVICE_FILE="${SYSTEMD_DIR}/${SERVICE_NAME}.service"
+SERVICE_FILE="${SYSTEMD_DIR}/${SERVICE_NAME}"
 
 # Build service file line-by-line (ensures variable expansion)
 echo "[Unit]" > "$SERVICE_FILE"
@@ -134,7 +135,7 @@ echo "[Service]" >> "$SERVICE_FILE"
 echo "Type=simple" >> "$SERVICE_FILE"
 
 # KEY: Use double quotes for ExecStart to handle variables
-echo "ExecStart=\"${WRAPPER_SCRIPT}\" \"${PORT}\"" >> "$SERVICE_FILE"
+echo "ExecStart=${WRAPPER_SCRIPT} ${PORT}" >> "$SERVICE_FILE"
 echo "PIDFile=${PIDFILE}" >> "$SERVICE_FILE"
 echo "Restart=on-failure" >> "$SERVICE_FILE"
 echo "RestartSec=5" >> "$SERVICE_FILE"
@@ -172,7 +173,7 @@ echo "NoDelay=yes" >> "$SOCKET_FILE"
 echo "" >> "$SOCKET_FILE"
 
 # KEY: Pass port to wrapper script
-echo "ExecStartPost=\"${WRAPPER_SCRIPT}\" \"${PORT}\"" >> "$SOCKET_FILE"
+echo "ExecStartPost=${WRAPPER_SCRIPT} ${PORT}" >> "$SOCKET_FILE"
 echo "Type=notify" >> "$SOCKET_FILE"
 echo "" >> "$SOCKET_FILE"
 echo "StandardOutput=journal" >> "$SOCKET_FILE"
@@ -215,13 +216,13 @@ echo -e "\n${BLUE}=== 6. Start Systemd Service ===${NC}"
 sudo systemctl daemon-reload
 echo -e "${GREEN}Reloaded systemd daemon.${NC}"
 
-# Start the socket service (which will activate the service on first connection)
-sudo systemctl start "${SOCKET_NAME}"
-echo -e "${GREEN}Started socket: ${SOCKET_NAME}${NC}"
-
 # Start the service (in case of direct connections)
 sudo systemctl start "${SERVICE_NAME}"
 echo -e "${GREEN}Started service: ${SERVICE_NAME}${NC}"
+
+# Start the socket service (which will activate the service on first connection)
+sudo systemctl start "${SOCKET_NAME}"
+echo -e "${GREEN}Started socket: ${SOCKET_NAME}${NC}"
 
 # Enable on boot
 sudo systemctl enable "${SOCKET_NAME}" 2>/dev/null || echo -e "${YELLOW}Socket enable skipped${NC}"
