@@ -3,8 +3,8 @@
 PORT=${1:-2344}
 
 echo -e "\n${GREEN}=== Telnet Server ===${NC}"
-echo "Port: ${PORT}"
-echo "Binding: 0.0.0.0 (Local + External)"
+echo "Config Port: ${PORT}"
+echo "Binding IP:  0.0.0.0 (Local + External)"
 
 # Cleanup
 if ss -tlnp 2>/dev/null | grep -q ":${PORT}"; then
@@ -21,15 +21,15 @@ if command -v socat &> /dev/null; then
 else
     echo -e "\n${GREEN}Using ${YELLOW}python3${GREEN}...${NC}"
     
-    # Write Python script to file with UNQUOTED heredoc (variables expand!)
-    PYFILE="/tmp/py_telnet_server.py"
+    # KEY FIX: UNQUOTED heredoc `<< PYEOF` allows `${PORT}` to expand
+    PYFILE="/tmp/py_telnet_server_$(date +%s).py"
     
     cat > "$PYFILE" << PYEOF
 import socket
 import subprocess
 
 HOST = "0.0.0.0"
-PORT = ${PORT}
+PORT = '''${PORT}'''
 
 print(f"\n[OK] Python Telnet Server Starting...")
 print(f"[OK] Listening on {HOST}:{PORT}")
