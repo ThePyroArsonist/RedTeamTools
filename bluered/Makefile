@@ -22,7 +22,7 @@ BACKDOOR_OBJ = $(SRC_DIR)/backdoor.o
 WINSOCK_ADMIN_OBJ = $(SRC_DIR)/winsock_admin.o
 
 OBJECTS = $(MAIN_OBJ) $(EXPLOIT_OBJ) $(PERSISTENCE_OBJ) $(BACKDOOR_OBJ) $(WINSOCK_ADMIN_OBJ)
-TARGET = $(SRC_DIR)/BlueRedExe.exe
+TARGET = $(SRC_DIR)/BlueRed.exe
 
 # Default target
 .PHONY: all clean recompile run

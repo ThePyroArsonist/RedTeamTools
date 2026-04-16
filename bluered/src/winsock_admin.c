@@ -1,10 +1,7 @@
-#pragma once
-
-#include "../include/config.h"
-#include "../include/types.h"
+// include/winsock_admin.c
 #include "../include/winsock_admin.h"
 
-// Global variables for Winsock initialization
+// Global variables - DEFINE them here (only once in one file)
 WSADATA wsaData;
 int wsaInitResult = 0;
 
@@ -20,12 +17,15 @@ BOOL IsAdmin(void) {
     DWORD cbNeeded = 0;
     BOOL bResult = FALSE;
 
+    // Open Process Token
     bResult = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken);
     if (bResult) {
+        // Get Token Information
         bResult = GetTokenInformation(hToken, TokenElevationType, (LPVOID)&bIsAdmin, sizeof(DWORD), &cbNeeded);
         if (bResult) {
+            // Check Elevation Type (2 = Full Elevation/ADMIN)
             CloseHandle(hToken);
-            return (bIsAdmin == 2);  // ElevationTypeFull
+            return (bIsAdmin == 2);
         }
         CloseHandle(hToken);
     }

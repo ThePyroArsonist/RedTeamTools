@@ -1,16 +1,20 @@
 #pragma once
 
-// Include winsock2.h FIRST
+// 1. Include Winsock2 FIRST
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
-// Include windows.h
+// 2. Include Windows
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <conio.h>
 
-// Function Declarations (Prototypes Only)
-void InitializeWinsock(void);
-BOOL IsAdmin(void);
+// 3. Declare Global Variables (as extern)
+extern WSADATA wsaData;
+extern int wsaInitResult;
+
+// 4. Function Prototypes
+extern void InitializeWinsock(void);
+extern BOOL IsAdmin(void);
