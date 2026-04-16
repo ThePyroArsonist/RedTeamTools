@@ -15,7 +15,7 @@ SOURCES = \
     $(SRC_DIR)/winsock_admin.c 
 
 OBJECTS = $(SOURCES:.c=.o)
-TARGET = $(SRC_DIR)/BlueRedExe.exe
+TARGET = $(SRC_DIR)/BlueRed.exe
 
 # Default target
 .PHONY: all clean recompile run
