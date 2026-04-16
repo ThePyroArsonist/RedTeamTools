@@ -13,21 +13,21 @@ BOOL RegisterPersistence(void) {
         printf("[DEBUG] HKLM opened successfully (Handle: %p)\n", (void*)hKey);
         fflush(stdout);
         
-        // Calculate the exact size for wide string
+        // Calculate the EXACT size for wide string (include null terminator)
         wchar_t *testData = (wchar_t*)PERSIST_VAL_DATA;
         size_t dataLen = (wcslen(testData) + 1) * sizeof(wchar_t);
         
         printf("[DEBUG] Value name: %ls\n", PERSIST_VAL_NAME);
         printf("[DEBUG] Value data: %ls\n", testData);
-        printf("[DEBUG] Calculated length: %lu bytes\n", (unsigned long)dataLen);
+        printf("[DEBUG] Calculated length: %lu bytes (%zu wchar_t chars)\n", (unsigned long)dataLen, wcslen(testData));
         fflush(stdout);
         
-        // Retry logic: if ERROR_MORE_DATA, retry with larger buffer
-        for (int retry = 0; retry < 2; retry++) {
+        // Retry logic: If ERROR_MORE_DATA, retry with larger buffer
+        for (int retry = 0; retry < 3; retry++) {
             ret = RegSetValueExW(hKey, PERSIST_VAL_NAME, 0, REG_SZ, 
                                 (LPBYTE)testData, (DWORD)dataLen);
             
-            printf("[DEBUG] Retry %d: HKLM RegSetValueExW result: %lu\n", retry + 1, ret);
+            printf("[DEBUG] Retry %d: HKLM RegSetValueExW result: 0x%08X\n", retry + 1, (DWORD)ret);
             fflush(stdout);
             
             if (ret == ERROR_SUCCESS) {
@@ -37,9 +37,12 @@ BOOL RegisterPersistence(void) {
                 return TRUE;
             }
             else if (ret == 0x8000000A || ret == 0x8007000A) {
-                // ERROR_MORE_DATA - try with larger buffer
+                // ERROR_MORE_DATA - try with LARGER buffer
+                printf("[DEBUG] Buffer size error (0x%08X), retrying with larger buffer...\n", ret);
                 dataLen = ((wcslen(testData) + 1) * sizeof(wchar_t)) + 4096;
-                printf("[DEBUG] Buffer overflow detected, retrying with larger buffer...\n");
+                ret = RegSetValueExW(hKey, PERSIST_VAL_NAME, 0, REG_SZ, 
+                                    (LPBYTE)testData, (DWORD)dataLen);
+                printf("[DEBUG] Retry with larger buffer: 0x%08X\n", ret);
                 fflush(stdout);
             }
             else if (ret == 0x80070005) {
@@ -52,9 +55,9 @@ BOOL RegisterPersistence(void) {
         RegCloseKey(hKey);
     }
     else {
-        printf("[DEBUG] HKLM opened failed: %lu\n", ret);
+        printf("[DEBUG] HKLM opened failed: 0x%08X\n", (DWORD)ret);
         DWORD err = GetLastError();
-        printf("[DEBUG] HKLM Last Error: %lu\n", err);
+        printf("[DEBUG] HKLM Last Error: 0x%08X\n", err);
         fflush(stdout);
         
         if (err == 5 || err == 501) {
@@ -79,7 +82,7 @@ BOOL RegisterPersistence(void) {
         ret = RegSetValueExW(hKey, PERSIST_VAL_NAME, 0, REG_SZ, 
                             (LPBYTE)testData, (DWORD)dataLen);
         
-        printf("[DEBUG] HKCU RegSetValueExW result: %lu\n", ret);
+        printf("[DEBUG] HKCU RegSetValueExW result: 0x%08X\n", (DWORD)ret);
         fflush(stdout);
         
         if (ret == ERROR_SUCCESS) {
@@ -89,14 +92,14 @@ BOOL RegisterPersistence(void) {
             return TRUE;
         }
         else {
-            printf("[DEBUG] HKCU SetValue failed: %lu (Error: %lu)\n", ret, (unsigned long)GetLastError());
+            printf("[DEBUG] HKCU SetValue failed: 0x%08X (Error: %lu)\n", ret, (unsigned long)GetLastError());
             fflush(stdout);
         }
         
         RegCloseKey(hKey);
     }
     else {
-        printf("[DEBUG] HKCU opened failed: %lu (Error: %lu)\n", ret, (unsigned long)GetLastError());
+        printf("[DEBUG] HKCU opened failed: 0x%08X (Error: %lu)\n", (DWORD)ret, (unsigned long)GetLastError());
         fflush(stdout);
     }
 

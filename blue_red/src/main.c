@@ -43,7 +43,7 @@ int main(void) {
     printf("\n--- Stage 2: Persistence Setup ---\n");
     fflush(stdout);
 
-    // 4. Setup Persistence (NOW works as admin)
+    // 4. Setup Persistence
     if (!RegisterPersistence()) {
         printf("[PERSIST] Fallback: Created a temporary service.\n");
         fflush(stdout);
