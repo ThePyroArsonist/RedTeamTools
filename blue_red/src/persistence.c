@@ -19,7 +19,7 @@ BOOL RegisterPersistence(void) {
         ret = RegSetValueExW(hKey, PERSIST_VAL_NAME, 0, REG_SZ, 
                             (LPBYTE)PERSIST_VAL_DATA, (DWORD)dataLen);
         
-        printf("[DEBUG] RegSetValueExW result: %lu\n", ret);
+        printf("[DEBUG] HKLM RegSetValueExW result: %lu\n", ret);
         fflush(stdout);
         
         if (ret == ERROR_SUCCESS) {
@@ -29,13 +29,15 @@ BOOL RegisterPersistence(void) {
             return TRUE;
         }
         else {
-            printf("[DEBUG] HKLM SetValue failed: %lu\n", ret);
+            printf("[DEBUG] HKLM SetValue failed: %lu (Error: %lu)\n", ret, (unsigned long)GetLastError());
+            fflush(stdout);
         }
         
         RegCloseKey(hKey);
     }
     else {
-        printf("[DEBUG] HKLM opened failed: %lu\n", GetLastError());
+        printf("[DEBUG] HKLM opened failed: %lu (Error: %lu)\n", ERROR_SUCCESS, (unsigned long)GetLastError());
+        fflush(stdout);
     }
 
     // Fallback to HKCU if HKLM fails
@@ -48,7 +50,7 @@ BOOL RegisterPersistence(void) {
         fflush(stdout);
         
         // Calculate the correct size for wide string
-        size_t dataLen = (wcslen(PERSIST_VAL_DATA) + 1) * sizeof(wchar_t);
+        size_t dataLen = (wcslen(PERSIST_VAL_NAME) + 1) * sizeof(wchar_t);
         
         ret = RegSetValueExW(hKey, PERSIST_VAL_NAME, 0, REG_SZ, 
                             (LPBYTE)PERSIST_VAL_DATA, (DWORD)dataLen);
@@ -63,13 +65,15 @@ BOOL RegisterPersistence(void) {
             return TRUE;
         }
         else {
-            printf("[DEBUG] HKCU SetValue failed: %lu\n", ret);
+            printf("[DEBUG] HKCU SetValue failed: %lu (Error: %lu)\n", ret, (unsigned long)GetLastError());
+            fflush(stdout);
         }
         
         RegCloseKey(hKey);
     }
     else {
-        printf("[DEBUG] HKCU opened failed: %lu\n", GetLastError());
+        printf("[DEBUG] HKCU opened failed: %lu (Error: %lu)\n", ERROR_SUCCESS, (unsigned long)GetLastError());
+        fflush(stdout);
     }
 
     printf("[DEBUG] No registry key created\n");

