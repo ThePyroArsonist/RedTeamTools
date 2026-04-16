@@ -1,6 +1,6 @@
 # Compiler and Flags
 CC = "C:\Program Files\mingw64\bin\gcc.exe"
-CFLAGS = -Wall -Wextra -O2 -mwindows -msse2
+CFLAGS = -Wall -Wextra -O2 -mwindows -msse2 -mconsole
 LDFLAGS = -lws2_32 -ladvapi32 -lshell32
 
 # Directories

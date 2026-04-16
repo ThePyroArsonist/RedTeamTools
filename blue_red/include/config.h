@@ -10,6 +10,7 @@
 #include <string.h>
 #include <shellapi.h>
 #include <ws2tcpip.h> 
+#include <conio.h>
 
 // Exploit Timing
 #define EXPLOIT_DELAY_MS 150
