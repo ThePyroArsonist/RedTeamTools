@@ -1,0 +1,4 @@
+LIBRARY WindowsSSP
+EXPORTS
+    SpInitialize
+    SpShutdown

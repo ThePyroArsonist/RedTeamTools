@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>DNS C2 Dashboard</title>
+</head>
+<body>
+    <h2>DNS C2 Dashboard</h2>
+    <pre id="output"></pre>
+
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <script>
+        const socket = io();
+
+        socket.on("update", data => {
+            document.getElementById("output").textContent =
+                JSON.stringify(data, null, 2);
+        });
+    </script>
+</body>
+</html>
